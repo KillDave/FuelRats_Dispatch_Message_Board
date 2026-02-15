@@ -22,7 +22,7 @@ __pycache__/
 *.pyc
 
 # Debug/test files
-node.py
+/node.py
 node_debug.py
 node_debug_2.py
 node_debug_v2.py
