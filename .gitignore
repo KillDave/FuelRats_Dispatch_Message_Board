@@ -1,0 +1,59 @@
+# Dependencies
+node_modules/
+dist/
+
+# Environment variables (contains secrets like API keys)
+.env
+.env.local
+.env.production
+.env*.local
+
+# OS files
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.pyc
+
+# Debug/test files
+node.py
+node_debug.py
+node_debug_2.py
+node_debug_v2.py
+irc-bridge-fixed.py
+irc-websocket-bridge.py
+websocket-irc-bridge.js
+irc-test.html
+test_browser_connection.html
+test_dispatch_connection.html
+test_connection.py
+test_websocket_server.py
+ws-diagnostic.html
+check_setup.py
+fuel_rat_F12.log.tsx
+start_debug_bridge.bat
+start_normal_bridge.bat
+ATTRIBUTIONS.md
+bridge-package.json
+caseexample.json
+CONNECTION_DIAGRAM.txt
+IRC_README.md
+IRC_SETUP.md
+MESSAGE_FLOW.md
+PYTHON_IRC_SETUP.md
+QUICK_REFERENCE.md
+QUICKSTART.md
+Response_Rescue
+START_HERE.md
+
+# Debug/troubleshooting docs
+ERROR_SUMMARY.txt
+DIAGNOSE_INVALID_HTTP.md
+README_ERROR_FIX.md
+TROUBLESHOOTING_EOFERROR.md
