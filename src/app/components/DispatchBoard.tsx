@@ -374,13 +374,14 @@ export function DispatchBoard() {
   const sortedCases = [...cases].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
   const visibleCases = sortedCases.filter((c) => toggledCaseIds.has(c.id));
 
-  const addMessage = (caseId: string, text: string) => {
+  const addMessage = (caseId: string, text: string, channel?: string) => {
     if (!text.trim()) return;
+    const targetChannel = channel || ircChannel;
     // Commands like /tr are executed by AdiIRC directly, not wrapped in PRIVMSG
     if (text.startsWith('/')) {
       ircWebSocket.sendRaw(text);
     } else {
-      ircWebSocket.sendMessage(ircChannel, text);
+      ircWebSocket.sendMessage(targetChannel, text);
 
       // Add the message to this case window immediately so it appears right away
       // The deduplication logic will prevent it from showing twice when it bounces back via IRC

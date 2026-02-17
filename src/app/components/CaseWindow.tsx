@@ -3,6 +3,7 @@ import type { Case, CaseStatus } from './DispatchBoard';
 import { Button } from '@/app/components/ui/button';
 import { Input } from '@/app/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/app/components/ui/popover';
+import { rescueMessages, dispatchMessages } from '../config/quickMessages';
 import {
   User,
   Clock,
@@ -13,8 +14,6 @@ import {
   MoreVertical,
   Languages,
   X,
-  MessageCircle,
-  Star,
   ChevronDown,
 } from 'lucide-react';
 
@@ -22,7 +21,7 @@ interface CaseWindowProps {
   caseData: Case;
   totalCases: number;
   caseIndex: number;
-  onAddMessage: (caseId: string, text: string, isExternal?: boolean) => void;
+  onAddMessage: (caseId: string, text: string, channel?: string) => void;
   onStatusChange: (caseId: string, status: CaseStatus) => void;
   onClose: (caseId: string) => void;
   onAssignRat: (caseId: string, ratName: string) => void;
@@ -72,9 +71,7 @@ export function CaseWindow({
   const [translateEnabled, setTranslateEnabled] = useState(false);
   const [rescuePopoverOpen, setRescuePopoverOpen] = useState(false);
   const [dispatchPopoverOpen, setDispatchPopoverOpen] = useState(false);
-  const [normalPopoverOpen, setNormalPopoverOpen] = useState(false);
-  const [crPopoverOpen, setCrPopoverOpen] = useState(false);
-  const [othersPopoverOpen, setOthersPopoverOpen] = useState(false);
+  const [subPopoverOpen, setSubPopoverOpen] = useState<Record<string, boolean>>({});
   const [openRatMenuId, setOpenRatMenuId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatAreaRef = useRef<HTMLDivElement>(null);
@@ -252,9 +249,7 @@ export function CaseWindow({
       setCombinedPopoverOpen(false);
       setRescuePopoverOpen(false);
       setDispatchPopoverOpen(false);
-      setNormalPopoverOpen(false);
-      setCrPopoverOpen(false);
-      setOthersPopoverOpen(false);
+      setSubPopoverOpen({});
     }
   };
 
@@ -285,19 +280,35 @@ export function CaseWindow({
     }
   };
 
+  const caseNumber = parseInt(caseData.id.split('-')[1], 10);
+
+  // Resolve {clientName} and {caseNumber} placeholders in quick message templates
+  // Uses trMessage (without client name prefix) when /tr is enabled
+  const resolveMessage = (msg: { message: string; trMessage?: string }) => {
+    const template = (translateEnabled && msg.trMessage) ? msg.trMessage : msg.message;
+    return template.replace(/\{clientName\}/g, caseData.clientName).replace(/\{caseNumber\}/g, String(caseNumber));
+  };
+
+  // Commands that support the -a (auto-translate) suffix
+  const trCommands = new Set([
+    '!crinst', '!donate', '!fueltank', '!invite', '!kgbfoam', '!multi',
+    '!o2synth', '!oldcrinst', '!oldkgbfoam', '!pg', '!pqueue', '!prep',
+    '!prepcr', '!reboot', '!rto', '!sc', '!quit', '!team', '!relog',
+    '!modules', '!open', '!frcr', '!wing', '!beacon', '!fr', '!gofr', '!go',
+  ]);
+
   const sendQuickMessage = (message: string) => {
-    const caseNumber = parseInt(caseData.id.split('-')[1], 10);
     let finalMessage = message;
-    
-    // If /tr is enabled and message starts with !, add -a after the command
+
+    // If /tr is enabled and command supports -a, add -a after the command
     if (translateEnabled && message.startsWith('!')) {
-      // Split the message to get command and arguments
       const parts = message.split(' ');
       const command = parts[0]; // e.g., "!team"
-      const args = parts.slice(1).join(' '); // everything after the command
-      
-      // Add -a suffix to the command
-      finalMessage = `${command}-a${args ? ' ' + args : ''}`;
+      const args = parts.slice(1).join(' ');
+
+      if (trCommands.has(command)) {
+        finalMessage = `${command}-a${args ? ' ' + args : ''}`;
+      }
     } else if (translateEnabled && !message.startsWith('!')) {
       // Regular messages get /tr prefix
       finalMessage = `/tr ${caseNumber} ${message}`;
@@ -455,36 +466,34 @@ export function CaseWindow({
                                 >
                                   <div className="flex flex-col gap-1">
                                     <button
-                                      className="flex items-center gap-2 px-3 py-2 text-xs text-slate-300 hover:bg-slate-800 rounded transition-colors"
-                                      onClick={() => {
-                                        onAddMessage(caseData.id, `@${rat} `);
-                                        setOpenRatMenuId(null);
-                                        messageInputRef.current?.focus();
-                                      }}
-                                    >
-                                      <MessageCircle className="w-3 h-3" />
-                                      Message Rat
-                                    </button>
-                                    <button
-                                      className="flex items-center gap-2 px-3 py-2 text-xs text-yellow-400 hover:bg-slate-800 rounded transition-colors"
-                                      onClick={() => {
-                                        // Mark as primary rat functionality
-                                        onAddMessage(caseData.id, `${rat} is now primary rat`, true);
-                                        setOpenRatMenuId(null);
-                                      }}
-                                    >
-                                      <Star className="w-3 h-3" />
-                                      Set as Primary
-                                    </button>
-                                    <button
                                       className="flex items-center gap-2 px-3 py-2 text-xs text-red-400 hover:bg-slate-800 rounded transition-colors"
                                       onClick={() => {
-                                        onRemoveRat(caseData.id, rat);
+                                        onAddMessage(caseData.id, `!standdown ${caseNumber} ${rat}`, '#ratchat');
                                         setOpenRatMenuId(null);
                                       }}
                                     >
                                       <X className="w-3 h-3" />
-                                      Remove from Case
+                                      Remove
+                                    </button>
+                                    <button
+                                      className="flex items-center gap-2 px-3 py-2 text-xs text-green-400 hover:bg-slate-800 rounded transition-colors"
+                                      onClick={() => {
+                                        onAddMessage(caseData.id, `!close ${caseNumber} ${rat}`, '#ratchat');
+                                        setOpenRatMenuId(null);
+                                      }}
+                                    >
+                                      <Zap className="w-3 h-3" />
+                                      Close
+                                    </button>
+                                    <button
+                                      className="flex items-center gap-2 px-3 py-2 text-xs text-yellow-400 hover:bg-slate-800 rounded transition-colors"
+                                      onClick={() => {
+                                        onAddMessage(caseData.id, `!close -p ${caseNumber} ${rat}`, '#ratchat');
+                                        setOpenRatMenuId(null);
+                                      }}
+                                    >
+                                      <Zap className="w-3 h-3" />
+                                      Close -p
                                     </button>
                                   </div>
                                 </PopoverContent>
@@ -526,39 +535,18 @@ export function CaseWindow({
                             </PopoverTrigger>
                             <PopoverContent className="w-56 bg-slate-800/90 backdrop-blur-md border-slate-700 p-2" side="right" align="start">
                               <div className="space-y-1">
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="w-full text-xs h-8 bg-slate-900 border-slate-600 text-white hover:bg-slate-700"
-                                  onMouseDown={(e) => e.preventDefault()}
-                                  onClick={() => {
-                                    sendQuickMessage(`${caseData.clientName}, please turn your Life Support on immediately: go to the right menu -> Modules tab, select Life Support and select Activate`);
-                                  }}
-                                >
-                                  Life Support
-                                </Button>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="w-full text-xs h-8 bg-slate-900 border-slate-600 text-white hover:bg-slate-700"
-                                  onMouseDown={(e) => e.preventDefault()}
-                                  onClick={() => {
-                                    sendQuickMessage(`${caseData.clientName}, you should be receiving fuel. Thank you for calling the Fuel Rats :D. Stick around with your rat in game for some fuel management advice.`);
-                                  }}
-                                >
-                                  Fuel
-                                </Button>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="w-full text-xs h-8 bg-slate-900 border-slate-600 text-white hover:bg-slate-700"
-                                  onMouseDown={(e) => e.preventDefault()}
-                                  onClick={() => {
-                                    sendQuickMessage(`${caseData.clientName}, sorry we couldn't get to you in time today :(. Your rat will be there for you after you respawn to help you with some tips and tricks, so please stick with them for a bit.`);
-                                  }}
-                                >
-                                  Failed
-                                </Button>
+                                {rescueMessages.map((msg) => (
+                                  <Button
+                                    key={msg.label}
+                                    variant="outline"
+                                    size="sm"
+                                    className="w-full text-xs h-8 bg-slate-900 border-slate-600 text-white hover:bg-slate-700"
+                                    onMouseDown={(e: any) => e.preventDefault()}
+                                    onClick={() => sendQuickMessage(resolveMessage(msg))}
+                                  >
+                                    {msg.label}
+                                  </Button>
+                                ))}
                               </div>
                             </PopoverContent>
                           </Popover>
@@ -566,154 +554,52 @@ export function CaseWindow({
                           {/* Dispatch Popover */}
                           <Popover open={dispatchPopoverOpen} onOpenChange={setDispatchPopoverOpen}>
                             <PopoverTrigger className="w-full text-xs h-8 bg-slate-900 border border-slate-600 text-white hover:bg-slate-700 rounded px-2">
-                              {'>'}DISPATCH{'<'}
+                              {'>'}{dispatchMessages.label}{'<'}
                             </PopoverTrigger>
                             <PopoverContent className="w-56 bg-slate-800/90 backdrop-blur-md border-slate-700 p-2" side="right" align="start">
                               <div className="space-y-1">
-                                {/* Normal Popover */}
-                                <Popover open={normalPopoverOpen} onOpenChange={setNormalPopoverOpen}>
-                                  <PopoverTrigger className="w-full text-xs h-8 bg-slate-900 border border-slate-600 text-white hover:bg-slate-700 rounded px-2">
-                                    {'>'}NORMAL{'<'}
-                                  </PopoverTrigger>
-                                  <PopoverContent className="w-56 bg-slate-800/90 backdrop-blur-md border-slate-700 p-2" side="right" align="start">
-                                    <div className="space-y-1">
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        className="w-full text-xs h-8 bg-slate-900 border-slate-600 text-white hover:bg-slate-700"
-                                        onMouseDown={(e) => e.preventDefault()}
-                                        onClick={() => {
-                                          sendQuickMessage(`${caseData.clientName}, welcome to the Fuel Rats. Please let me know when you've completed the instructions above. Alert me immediately if at any time a blue "oxygen depleted in …" timer counting down appears.`);
-                                        }}
-                                      >
-                                        Welcome
-                                      </Button>
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        className="w-full text-xs h-8 bg-slate-900 border-slate-600 text-white hover:bg-slate-700"
-                                        onMouseDown={(e) => e.preventDefault()}
-                                        onClick={() => {
-                                          sendQuickMessage(`${caseData.clientName}, please disable the following modules in the right menu: Cargo Hatch, everything in the hardpoints tab`);
-                                        }}
-                                      >
-                                        Modules
-                                      </Button>
-                                    </div>
-                                  </PopoverContent>
-                                </Popover>
+                                {/* Subgroup popovers (NORMAL, CODE RED, OTHERS) */}
+                                {dispatchMessages.subgroups?.map((subgroup) => (
+                                  <Popover
+                                    key={subgroup.label}
+                                    open={subPopoverOpen[subgroup.label] || false}
+                                    onOpenChange={(open: any) => setSubPopoverOpen((prev) => ({ ...prev, [subgroup.label]: open }))}
+                                  >
+                                    <PopoverTrigger className="w-full text-xs h-8 bg-slate-900 border border-slate-600 text-white hover:bg-slate-700 rounded px-2">
+                                      {'>'}{subgroup.label}{'<'}
+                                    </PopoverTrigger>
+                                    <PopoverContent className="w-56 bg-slate-800/90 backdrop-blur-md border-slate-700 p-2" side="right" align="start">
+                                      <div className="space-y-1">
+                                        {subgroup.messages?.map((msg) => (
+                                          <Button
+                                            key={msg.label}
+                                            variant="outline"
+                                            size="sm"
+                                            className="w-full text-xs h-8 bg-slate-900 border-slate-600 text-white hover:bg-slate-700"
+                                            onMouseDown={(e: any) => e.preventDefault()}
+                                            onClick={() => sendQuickMessage(resolveMessage(msg))}
+                                          >
+                                            {msg.label}
+                                          </Button>
+                                        ))}
+                                      </div>
+                                    </PopoverContent>
+                                  </Popover>
+                                ))}
 
-                                {/* CR Popover */}
-                                <Popover open={crPopoverOpen} onOpenChange={setCrPopoverOpen}>
-                                  <PopoverTrigger className="w-full text-xs h-8 bg-slate-900 border border-slate-600 text-white hover:bg-slate-700 rounded px-2">
-                                    {'>'}CODE RED{'<'}
-                                  </PopoverTrigger>
-                                  <PopoverContent className="w-56 bg-slate-800/90 backdrop-blur-md border-slate-700 p-2" side="right" align="start">
-                                    <div className="space-y-1">
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        className="w-full text-xs h-8 bg-slate-900 border-slate-600 text-white hover:bg-slate-700"
-                                        onMouseDown={(e) => e.preventDefault()}
-                                        onClick={() => {
-                                          sendQuickMessage(`${caseData.clientName}, welcome to the Fuel Rats. DO NOT LOGOUT or QUIT to menu. Please complete the instructions above ASAP and let me know when done.`);
-                                        }}
-                                      >
-                                        Welcome
-                                      </Button>
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        className="w-full text-xs h-8 bg-slate-900 border-slate-600 text-white hover:bg-slate-700"
-                                        onMouseDown={(e) => e.preventDefault()}
-                                        onClick={() => {
-                                          sendQuickMessage(`!crinst ${parseInt(caseData.id.split('-')[1], 10)}`);
-                                        }}
-                                      >
-                                        !CRINST
-                                      </Button>
-                                    </div>
-                                  </PopoverContent>
-                                </Popover>
-
-                                {/* OTHERS Popover */}
-                                <Popover open={othersPopoverOpen} onOpenChange={setOthersPopoverOpen}>
-                                  <PopoverTrigger className="w-full text-xs h-8 bg-slate-900 border border-slate-600 text-white hover:bg-slate-700 rounded px-2">
-                                    {'>'}OTHERS{'<'}
-                                  </PopoverTrigger>
-                                  <PopoverContent className="w-56 bg-slate-800/90 backdrop-blur-md border-slate-700 p-2" side="right" align="start">
-                                    <div className="space-y-1">
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        className="w-full text-xs h-8 bg-slate-900 border-slate-600 text-white hover:bg-slate-700"
-                                        onMouseDown={(e) => e.preventDefault()}
-                                        onClick={() => {
-                                          sendQuickMessage(`!multi ${parseInt(caseData.id.split('-')[1], 10)}`);
-                                        }}
-                                      >
-                                        !MULTI
-                                      </Button>
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        className="w-full text-xs h-8 bg-slate-900 border-slate-600 text-white hover:bg-slate-700"
-                                        onMouseDown={(e) => e.preventDefault()}
-                                        onClick={() => {
-                                          sendQuickMessage(`!reboot ${parseInt(caseData.id.split('-')[1], 10)}`);
-                                        }}
-                                      >
-                                        !REBOOT
-                                      </Button>
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        className="w-full text-xs h-8 bg-slate-900 border-slate-600 text-white hover:bg-slate-700"
-                                        onMouseDown={(e) => e.preventDefault()}
-                                        onClick={() => {
-                                          sendQuickMessage(`!rto ${parseInt(caseData.id.split('-')[1], 10)}`);
-                                        }}
-                                      >
-                                        !RTO
-                                      </Button>
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        className="w-full text-xs h-8 bg-slate-900 border-slate-600 text-white hover:bg-slate-700"
-                                        onMouseDown={(e) => e.preventDefault()}
-                                        onClick={() => {
-                                          sendQuickMessage(`!sc ${parseInt(caseData.id.split('-')[1], 10)}`);
-                                        }}
-                                      >
-                                        !SC
-                                      </Button>
-                                    </div>
-                                  </PopoverContent>
-                                </Popover>
-
-                                {/* Direct dispatch messages */}
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="w-full text-xs h-8 bg-slate-900 border-slate-600 text-white hover:bg-slate-700"
-                                  onMouseDown={(e) => e.preventDefault()}
-                                  onClick={() => {
-                                    sendQuickMessage(`!team ${parseInt(caseData.id.split('-')[1], 10)}`);
-                                  }}
-                                >
-                                  !TEAM
-                                </Button>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="w-full text-xs h-8 bg-slate-900 border-slate-600 text-white hover:bg-slate-700"
-                                  onMouseDown={(e) => e.preventDefault()}
-                                  onClick={() => {
-                                    sendQuickMessage(`!beacon ${parseInt(caseData.id.split('-')[1], 10)}`);
-                                  }}
-                                >
-                                  !BEACON
-                                </Button>
+                                {/* Top-level dispatch messages */}
+                                {dispatchMessages.messages?.map((msg) => (
+                                  <Button
+                                    key={msg.label}
+                                    variant="outline"
+                                    size="sm"
+                                    className="w-full text-xs h-8 bg-slate-900 border-slate-600 text-white hover:bg-slate-700"
+                                    onMouseDown={(e: any) => e.preventDefault()}
+                                    onClick={() => sendQuickMessage(resolveMessage(msg))}
+                                  >
+                                    {msg.label}
+                                  </Button>
+                                ))}
                               </div>
                             </PopoverContent>
                           </Popover>
