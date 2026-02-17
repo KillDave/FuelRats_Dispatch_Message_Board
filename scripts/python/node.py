@@ -161,7 +161,18 @@ def parse_irc_message(line):
         # Handle PING
         if line.startswith("PING"):
             return None  # Handle ping separately if needed
-        
+
+        # Handle IDENTIFY (AdiIRC sends our nick on connect)
+        if line.startswith("IDENTIFY "):
+            nick = line.split(" ", 1)[1].strip()
+            timestamp = datetime.utcnow().isoformat() + "Z"
+            return {
+                "type": "identify",
+                "nick": nick,
+                "text": f"Identified as {nick}",
+                "timestamp": timestamp
+            }
+
         # Parse IRC message
         if not line.startswith(":"):
             return None

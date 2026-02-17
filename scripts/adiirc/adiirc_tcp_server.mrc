@@ -29,6 +29,8 @@ on *:SOCKLISTEN:ircbridge: {
   var %sock = ircbridge $+ $rand(1000,9999)
   sockaccept %sock
   echo -s *** FuelRats IRC Bridge: Python bridge connected (%sock)
+  ; Send our nick to the bridge so the dispatch board knows who we are
+  sockwrite -n %sock IDENTIFY $me
 }
 
 on *:SOCKREAD:ircbridge*: {
@@ -70,9 +72,17 @@ on *:INPUT:#: {
 }
 
 on *:NOTICE:*:#fuelrats: {
-  ; Forward notices from #fuelrats (e.g. MechaSqueak translations)
+  ; Forward channel notices from #fuelrats
   var %msg = : $+ $nick $+ ! $+ $address($nick,5) NOTICE #fuelrats : $+ $1-
   sockwrite -n ircbridge* %msg
+}
+
+on *:NOTICE:*:?: {
+  ; Forward private notices from MechaSqueak (e.g. translations)
+  if ($nick == MechaSqueak[BOT]) {
+    var %msg = : $+ $nick $+ ! $+ $address($nick,5) NOTICE $me : $+ $1-
+    sockwrite -n ircbridge* %msg
+  }
 }
 
 on *:ACTION:*:#: {

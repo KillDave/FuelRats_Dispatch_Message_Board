@@ -1,5 +1,5 @@
 export interface IRCMessage {
-  type: 'message' | 'system' | 'join' | 'part' | 'quit' | 'action' | 'notice';
+  type: 'message' | 'system' | 'join' | 'part' | 'quit' | 'action' | 'notice' | 'identify';
   channel?: string;
   nick?: string;
   text: string;
@@ -17,6 +17,7 @@ export class IRCWebSocketService {
   private reconnectDelay: number = 3000;
   
   public status: IRCConnectionStatus = 'disconnected';
+  public myNick: string | null = null; // Our IRC nick, set via IDENTIFY from AdiIRC
   public onMessage: ((message: IRCMessage) => void) | null = null;
   public onStatusChange: ((status: IRCConnectionStatus) => void) | null = null;
   public onError: ((error: string) => void) | null = null;
@@ -159,6 +160,13 @@ export class IRCWebSocketService {
    * Handle incoming WebSocket message
    */
   private handleMessage(data: any): void {
+    // Capture our IRC nick from IDENTIFY messages
+    if (data.type === 'identify' && data.nick) {
+      this.myNick = data.nick;
+      console.log('[IRC WS] Identified as:', this.myNick);
+      return; // Don't forward identify to message handlers
+    }
+
     const ircMessage: IRCMessage = {
       type: data.type || 'message',
       channel: data.channel,

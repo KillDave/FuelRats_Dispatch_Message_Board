@@ -69,12 +69,14 @@ export interface Message {
   isSystem?: boolean;
   isIRC?: boolean; // Flag to identify IRC messages
   isNotice?: boolean; // Flag for IRC NOTICE messages (e.g. translations)
+  translation?: string; // Translated text attached to the original message
 }
 
 export interface Case {
   id: string;
   apiId?: string; // The API's internal UUID for this rescue
   clientName: string;
+  ircNick?: string; // The client's IRC nickname (may differ from clientName)
   system: string;
   platform: string;
   status: CaseStatus;
@@ -261,23 +263,65 @@ export function DispatchBoard() {
 
     setCases((prev) =>
       prev.map((c) => {
-        // Match by case number in message text, OR by the client's IRC nick (sender),
-        // OR by someone in #fuelrats mentioning the client's name in their message
-        const clientNameLower = c.clientName.toLowerCase();
-        const textLower = ircMsg.text.toLowerCase();
-        // Normalize spaces/underscores for IRC nick comparison (IRC nicks use _ for spaces)
-        const normalizedClientName = clientNameLower.replace(/[ _]/g, '[ _]');
-        const nameWordBoundary = new RegExp(`\\b${normalizedClientName}\\b`);
+        // Match by case number, IRC nick (exact), fuzzy client name, or text mention
         const nickLower = ircMsg.nick!.toLowerCase();
+        const textLower = ircMsg.text.toLowerCase();
+
+        // Prefer exact IRC nick match when available from the API
+        const ircNickLower = c.ircNick?.toLowerCase();
+        const exactNickMatch = ircNickLower && (nickLower === ircNickLower || textLower.includes(ircNickLower));
+
+        // Fallback: fuzzy match client name (handles spaces, underscores, periods)
+        const clientNameLower = c.clientName.toLowerCase();
+        const normalizedClientName = clientNameLower.replace(/[. _]+/g, '[. _]*');
+        const namePattern = new RegExp(normalizedClientName);
+        const fuzzyMatch = namePattern.test(nickLower) || namePattern.test(textLower);
+
+        // Check if the message sender is an assigned rat (e.g. "Dr Leo" → matches IRC nick "Dr_Leo")
+        const isAssignedRat = c.assignedRats.some((ratName) => {
+          const normalizedRat = ratName.toLowerCase().replace(/[. _]+/g, '[. _]*');
+          // Match sender nick OR rat name mentioned in text (e.g. MechaSqueak notice: "<PlzDontKillDave> ...")
+          return new RegExp(`^${normalizedRat}$`).test(nickLower) || new RegExp(normalizedRat).test(textLower);
+        });
+
+        // For private notices (e.g. MechaSqueak translations), match by text content
+        // since they aren't sent to a channel
+        const isPrivateNotice = isNotice && !ircMsg.channel?.startsWith('#');
+
         const isForThisCase =
           (ircMsg.caseId && c.id === ircMsg.caseId) ||
-          (ircMsg.channel === '#fuelrats' && nameWordBoundary.test(nickLower)) ||
-          (ircMsg.channel === '#fuelrats' && nameWordBoundary.test(textLower));
+          (ircMsg.channel === '#fuelrats' && (exactNickMatch || fuzzyMatch || isAssignedRat)) ||
+          (isPrivateNotice && (exactNickMatch || fuzzyMatch || isAssignedRat));
 
         if (!isForThisCase) return c;
 
         // Strip [#N] case prefix from outbound messages that bounced back via IRC
         const displayText = ircMsg.text.replace(/^\[#\d{1,2}\]\s*/, '');
+
+        // For translation notices, attach to the most recent message from that sender
+        // Notice format: "<SenderNick> translated text"
+        if (isNotice) {
+          const senderMatch = displayText.match(/^<([^>]+)>\s*(.+)$/s);
+          if (senderMatch) {
+            const [, originalSender, translatedText] = senderMatch;
+            // Find the most recent message from this sender (fuzzy match nick)
+            const normalizedSender = originalSender.toLowerCase().replace(/[. _]+/g, '[. _]*');
+            const senderPattern = new RegExp(`^${normalizedSender}$`, 'i');
+            const lastMsgIndex = [...c.messages].reverse().findIndex(
+              (msg) => !msg.isSystem && senderPattern.test(msg.sender.toLowerCase())
+            );
+            if (lastMsgIndex !== -1) {
+              const actualIndex = c.messages.length - 1 - lastMsgIndex;
+              const updatedMessages = [...c.messages];
+              updatedMessages[actualIndex] = {
+                ...updatedMessages[actualIndex],
+                translation: translatedText.trim(),
+              };
+              return { ...c, messages: updatedMessages };
+            }
+          }
+          // If we can't match to an original message, fall through and add as separate notice
+        }
 
         // Deduplicate by text only — catches messages that arrive via both IRC stream
         // and API quotes (where sender names differ between the two sources)
@@ -302,8 +346,15 @@ export function DispatchBoard() {
           setUnreadCases((prev) => new Set(prev).add(c.id));
         }
 
+        // Extract IRC nickname from "Incoming Client" messages if we don't have one yet
+        const updatedIrcNick = c.ircNick || (() => {
+          const nickMatch = displayText.match(/IRC Nickname:\s*(\S+)/i);
+          return nickMatch ? nickMatch[1] : undefined;
+        })();
+
         return {
           ...c,
+          ircNick: updatedIrcNick,
           messages: [...c.messages, newMessage],
         };
       })
@@ -323,13 +374,29 @@ export function DispatchBoard() {
   const sortedCases = [...cases].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
   const visibleCases = sortedCases.filter((c) => toggledCaseIds.has(c.id));
 
-  const addMessage = (_caseId: string, text: string) => {
+  const addMessage = (caseId: string, text: string) => {
     if (!text.trim()) return;
     // Commands like /tr are executed by AdiIRC directly, not wrapped in PRIVMSG
     if (text.startsWith('/')) {
       ircWebSocket.sendRaw(text);
     } else {
       ircWebSocket.sendMessage(ircChannel, text);
+
+      // Add the message to this case window immediately so it appears right away
+      // The deduplication logic will prevent it from showing twice when it bounces back via IRC
+      setCases((prev) =>
+        prev.map((c) => {
+          if (c.id !== caseId) return c;
+          const newMessage: Message = {
+            id: `local-${Date.now()}-${Math.random()}`,
+            sender: ircWebSocket.myNick || 'You',
+            text,
+            timestamp: new Date(),
+            isIRC: true,
+          };
+          return { ...c, messages: [...c.messages, newMessage] };
+        })
+      );
     }
   };
 

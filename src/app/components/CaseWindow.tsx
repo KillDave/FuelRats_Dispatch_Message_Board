@@ -375,6 +375,9 @@ export function CaseWindow({
                         </span>
                       </div>
                       <p className={`text-sm break-words ${msg.isNotice ? 'text-cyan-300 italic' : 'text-slate-200'}`}>{msg.isNotice ? `⟫ ${msg.text}` : msg.text}</p>
+                      {msg.translation && (
+                        <p className="text-sm break-words text-cyan-300 italic mt-1">⟫ {msg.translation}</p>
+                      )}
                     </>
                   )}
                   {msg.isSystem && (

@@ -875,6 +875,7 @@ export class FuelRatsApiService {
       id: caseId,
       apiId: rescue.id, // Store the API's UUID for WebSocket event matching
       clientName: attrs.client || attrs.clientNick,
+      ircNick: attrs.clientNick || undefined,
       system: attrs.system || 'Unknown',
       platform: this.formatPlatform(attrs.platform, attrs.expansion),
       status,
@@ -1032,16 +1033,6 @@ export class FuelRatsApiService {
     };
   }
 
-  // Legacy methods for backward compatibility (will be replaced by WebSocket)
-  startPolling(callback: (cases: Case[]) => void): void {
-    console.warn('startPolling is deprecated. Use connect() instead for WebSocket connection.');
-    this.connect(callback);
-  }
-
-  stopPolling(): void {
-    console.warn('stopPolling is deprecated. Use disconnect() instead.');
-    this.disconnect();
-  }
 }
 
 export const fuelRatsApi = new FuelRatsApiService();
