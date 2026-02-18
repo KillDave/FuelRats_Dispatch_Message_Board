@@ -97,8 +97,8 @@ export function DispatchBoard() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [unreadCases, setUnreadCases] = useState<Set<string>>(new Set());
   const [isLoadingApi, setIsLoadingApi] = useState(false);
-  const [rateLimitRemaining, setRateLimitRemaining] = useState(0);
-  const [secondsToReset, setSecondsToReset] = useState(0);
+  const [, setRateLimitRemaining] = useState(0);
+  const [, setSecondsToReset] = useState(0);
   const seenCaseIdsRef = useRef<Set<string>>(
     new Set(initialCases.map((c) => c.id))
   ); // Track which cases we've already seen to avoid flashing on every poll
@@ -606,14 +606,15 @@ export function DispatchBoard() {
                           )}
                         </div>
                         <div className={`flex items-center gap-2 text-xs mb-1 ${isVisible ? 'text-slate-400' : 'text-slate-600'}`}>
-                          <MapPin 
-                            className="w-3 h-3 flex-shrink-0 cursor-pointer hover:text-orange-400 transition-colors" 
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              navigator.clipboard.writeText(caseData.system);
-                            }}
-                            title="Click to copy system name"
-                          />
+                          <span title="Click to copy system name">
+                            <MapPin
+                              className="w-3 h-3 flex-shrink-0 cursor-pointer hover:text-orange-400 transition-colors"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                navigator.clipboard.writeText(caseData.system);
+                              }}
+                            />
+                          </span>
                           <span className="truncate">{caseData.system}</span>
                           <span>•</span>
                           <span>{caseData.platform}</span>
@@ -682,7 +683,7 @@ export function DispatchBoard() {
               </div>
             </div>
           ) : (
-            visibleCases.map((caseData, index) => (
+            visibleCases.map((caseData) => (
               <CaseWindow
                 key={caseData.id}
                 caseData={caseData}
