@@ -267,31 +267,47 @@ export function DispatchBoard() {
         const nickLower = ircMsg.nick!.toLowerCase();
         const textLower = ircMsg.text.toLowerCase();
 
+        // For translation notices like "<PlzDontKillDave> translated text",
+        // extract the inner sender nick so we can match by who originally spoke
+        let effectiveNickLower = nickLower;
+        if (isNotice) {
+          const innerNickMatch = ircMsg.text.match(/^<([^>]+)>/);
+          if (innerNickMatch) {
+            effectiveNickLower = innerNickMatch[1].toLowerCase();
+          }
+        }
+
         // Prefer exact IRC nick match when available from the API
         const ircNickLower = c.ircNick?.toLowerCase();
-        const exactNickMatch = ircNickLower && (nickLower === ircNickLower || textLower.includes(ircNickLower));
+        const exactNickMatch = ircNickLower && (effectiveNickLower === ircNickLower || textLower.includes(ircNickLower));
 
         // Fallback: fuzzy match client name (handles spaces, underscores, periods)
         const clientNameLower = c.clientName.toLowerCase();
         const normalizedClientName = clientNameLower.replace(/[. _]+/g, '[. _]*');
         const namePattern = new RegExp(normalizedClientName);
-        const fuzzyMatch = namePattern.test(nickLower) || namePattern.test(textLower);
+        const fuzzyMatch = namePattern.test(effectiveNickLower) || namePattern.test(textLower);
 
         // Check if the message sender is an assigned rat (e.g. "Dr Leo" → matches IRC nick "Dr_Leo")
         const isAssignedRat = c.assignedRats.some((ratName) => {
           const normalizedRat = ratName.toLowerCase().replace(/[. _]+/g, '[. _]*');
           // Match sender nick OR rat name mentioned in text (e.g. MechaSqueak notice: "<PlzDontKillDave> ...")
-          return new RegExp(`^${normalizedRat}$`).test(nickLower) || new RegExp(normalizedRat).test(textLower);
+          return new RegExp(`^${normalizedRat}$`).test(effectiveNickLower) || new RegExp(normalizedRat).test(textLower);
         });
 
         // For private notices (e.g. MechaSqueak translations), match by text content
         // since they aren't sent to a channel
         const isPrivateNotice = isNotice && !ircMsg.channel?.startsWith('#');
 
+        // Also check if the effective nick (from <SenderNick> in notices) recently sent
+        // a message in this case — handles dispatcher's own translations
+        const hasRecentMessage = isNotice && c.messages.some(
+          (msg) => !msg.isSystem && msg.sender.toLowerCase() === effectiveNickLower
+        );
+
         const isForThisCase =
           (ircMsg.caseId && c.id === ircMsg.caseId) ||
-          (ircMsg.channel === '#fuelrats' && (exactNickMatch || fuzzyMatch || isAssignedRat)) ||
-          (isPrivateNotice && (exactNickMatch || fuzzyMatch || isAssignedRat));
+          (ircMsg.channel === '#fuelrats' && (exactNickMatch || fuzzyMatch || isAssignedRat || hasRecentMessage)) ||
+          (isPrivateNotice && (exactNickMatch || fuzzyMatch || isAssignedRat || hasRecentMessage));
 
         if (!isForThisCase) return c;
 
