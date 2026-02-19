@@ -52,10 +52,10 @@ export function CaseWindow({
   totalCases,
   caseIndex,
   onAddMessage,
-  onStatusChange,
-  onClose,
-  onAssignRat,
-  onRemoveRat,
+  onStatusChange: _onStatusChange,
+  onClose: _onClose,
+  onAssignRat: _onAssignRat,
+  onRemoveRat: _onRemoveRat,
   hasUnread = false,
   onClearUnread,
   ircConnected,
@@ -90,7 +90,7 @@ export function CaseWindow({
     const lastMessage = caseData.messages[caseData.messages.length - 1];
     
     // For Code Red cases: flash continuously if only system messages exist
-    if (caseData.status === 'codeRed') {
+    if (caseData.status === 'code-red') {
       // Check if there are any non-system messages (excluding "Incoming Client" and disconnect/reconnect messages)
       const hasRealMessages = caseData.messages.some(msg => {
         // Skip system messages
@@ -172,9 +172,16 @@ export function CaseWindow({
     if (messageInput.trim()) {
       let finalMessage = messageInput;
 
-      // Apply /tr formatting if enabled and message doesn't start with !
-      if (translateEnabled && !messageInput.trim().startsWith('!')) {
-        // Extract case number without leading zero
+      if (translateEnabled && messageInput.trim().startsWith('!')) {
+        // For ! commands, append -a only if the command is in the whitelist
+        const parts = messageInput.trim().split(/\s+/);
+        const command = parts[0].toLowerCase();
+        const args = parts.slice(1).join(' ');
+        if (trCommands.has(command)) {
+          finalMessage = `${command}-a${args ? ' ' + args : ''}`;
+        }
+      } else if (translateEnabled) {
+        // Apply /tr formatting for regular messages
         const caseNumber = parseInt(caseData.id.split('-')[1], 10);
         finalMessage = `/tr ${caseNumber} ${messageInput}`;
       }
@@ -323,10 +330,10 @@ export function CaseWindow({
 
   return (
     <div
-      className={`flex-shrink-0 bg-slate-900/70 backdrop-blur-md border-r-2 last:border-r-0 ${statusColors[caseData.status]} h-full flex flex-col ${caseData.status === 'codeRed' && isFlickering ? 'code-red-flash' : 'transition-colors duration-[180ms]'}`}
+      className={`flex-shrink-0 bg-slate-900/70 backdrop-blur-md border-r-2 last:border-r-0 ${statusColors[caseData.status]} h-full flex flex-col ${caseData.status === 'code-red' && isFlickering ? 'code-red-flash' : 'transition-colors duration-[180ms]'}`}
       style={{
         width: `${widthPercent}%`,
-        backgroundColor: isFlickering && caseData.status !== 'codeRed' ? 'rgba(148, 148, 148, 0.7)' : undefined,
+        backgroundColor: isFlickering && caseData.status !== 'code-red' ? 'rgba(148, 148, 148, 0.7)' : undefined,
       }}
     >
       {/* Header */}

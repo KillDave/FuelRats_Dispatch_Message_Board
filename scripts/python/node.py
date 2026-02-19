@@ -79,10 +79,12 @@ async def handle_client(websocket):
                         
                         # Handle different message types
                         if data.get("type") == "message":
-                            # Format: PRIVMSG #channel :message
+                            # Format: msg #channel text (mIRC/AdiIRC command)
+                            # Using "msg" instead of raw "PRIVMSG" so AdiIRC
+                            # displays the message in its own channel window
                             target = data.get("target", "#fuelrats")
                             text = data.get("text", "")
-                            irc_command = f"PRIVMSG {target} :{text}\r\n"
+                            irc_command = f"msg {target} {text}\r\n"
                             writer.write(irc_command.encode())
                             await writer.drain()
                             print(f"→ IRC: {irc_command.strip()}")
