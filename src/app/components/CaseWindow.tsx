@@ -4,6 +4,7 @@ import { Button } from '@/app/components/ui/button';
 import { Input } from '@/app/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/app/components/ui/popover';
 import { rescueMessages, dispatchMessages } from '../config/quickMessages';
+import type { QuickMessage } from '../config/quickMessages';
 import {
   User,
   Clock,
@@ -289,11 +290,41 @@ export function CaseWindow({
 
   const caseNumber = parseInt(caseData.id.split('-')[1], 10);
 
+  // Detect platform key from caseData.platform string (e.g. "PC - Odyssey" → "pc")
+  const getPlatformKey = (): 'pc' | 'xbox' | 'playstation' | 'legacy' | null => {
+    const p = caseData.platform.toLowerCase();
+    if (p.includes('legacy')) return 'legacy';
+    if (p.includes('xbox')) return 'xbox';
+    if (p.includes('playstation')) return 'playstation';
+    if (p.includes('pc')) return 'pc';
+    return null;
+  };
+
   // Resolve {clientName} and {caseNumber} placeholders in quick message templates
-  // Uses trMessage (without client name prefix) when /tr is enabled
-  const resolveMessage = (msg: { message: string; trMessage?: string }) => {
-    const template = (translateEnabled && msg.trMessage) ? msg.trMessage : msg.message;
-    return template.replace(/\{clientName\}/g, caseData.clientName).replace(/\{caseNumber\}/g, String(caseNumber));
+  // Priority: platformVariants > variants > message (and tr equivalents)
+  const resolveMessage = (msg: QuickMessage) => {
+    const pick = (pool: string[]) => pool[Math.floor(Math.random() * pool.length)];
+    const platformKey = getPlatformKey();
+
+    // Determine template: platform-specific first, then random variants, then plain message
+    let template: string;
+    if (translateEnabled) {
+      const trPlatform = platformKey && msg.trPlatformVariants?.[platformKey];
+      const trDefault = msg.trPlatformVariants?.['default'];
+      const trPool = msg.trVariants?.length ? msg.trVariants : msg.trMessage ? [msg.trMessage] : null;
+      const nonTrPlatform = platformKey && msg.platformVariants?.[platformKey];
+      const nonTrDefault = msg.platformVariants?.['default'];
+      const nonTrPool = msg.variants?.length ? msg.variants : [msg.message];
+      template = trPlatform || trDefault || (trPool ? pick(trPool) : '') || nonTrPlatform || nonTrDefault || pick(nonTrPool);
+    } else {
+      const platform = platformKey && msg.platformVariants?.[platformKey];
+      const fallback = msg.platformVariants?.['default'];
+      const pool = msg.variants?.length ? msg.variants : [msg.message];
+      template = platform || fallback || pick(pool);
+    }
+
+    const clientName = caseData.ircNick || caseData.clientName;
+    return template.replace(/\{clientName\}/g, clientName).replace(/\{caseNumber\}/g, String(caseNumber));
   };
 
   // Commands that support the -a (auto-translate) suffix
@@ -304,7 +335,7 @@ export function CaseWindow({
     '!modules', '!open', '!frcr', '!wing', '!beacon', '!fr', '!gofr', '!go',
   ]);
 
-  const sendQuickMessage = (message: string) => {
+  const sendQuickMessage = (message: string, keepOpen?: boolean) => {
     let finalMessage = message;
 
     // If /tr is enabled and command supports -a, add -a after the command
@@ -320,12 +351,14 @@ export function CaseWindow({
       // Regular messages get /tr prefix
       finalMessage = `/tr ${caseNumber} ${message}`;
     }
-    
+
     onAddMessage(caseData.id, finalMessage);
-    // Refocus the input field after sending a quick message
-    setTimeout(() => {
-      messageInputRef.current?.focus();
-    }, 0);
+    // Only refocus the input if we're not keeping the popover open
+    if (!keepOpen) {
+      setTimeout(() => {
+        messageInputRef.current?.focus();
+      }, 0);
+    }
   };
 
   return (
@@ -493,7 +526,7 @@ export function CaseWindow({
                                       Close
                                     </button>
                                     <button
-                                      className="flex items-center gap-2 px-3 py-2 text-xs text-yellow-400 hover:bg-slate-800 rounded transition-colors"
+                                      className="flex items-center gap-2 px-3 py-2 text-xs text-red-400 hover:bg-slate-800 rounded transition-colors"
                                       onClick={() => {
                                         onAddMessage(caseData.id, `!close -p ${caseNumber} ${rat}`, '#ratchat');
                                         setOpenRatMenuId(null);
@@ -584,7 +617,7 @@ export function CaseWindow({
                                             size="sm"
                                             className="w-full text-xs h-8 bg-slate-900 border-slate-600 text-white hover:bg-slate-700"
                                             onMouseDown={(e: any) => e.preventDefault()}
-                                            onClick={() => sendQuickMessage(resolveMessage(msg))}
+                                            onClick={() => sendQuickMessage(resolveMessage(msg), subgroup.keepOpen)}
                                           >
                                             {msg.label}
                                           </Button>
