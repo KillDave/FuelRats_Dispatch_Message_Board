@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { CaseWindow } from './CaseWindow';
 import { Button } from '@/app/components/ui/button';
-import { Eye, EyeOff, Sidebar, User, MapPin, AlertTriangle, Clock, X } from 'lucide-react';
+import { Eye, EyeOff, Sidebar, User, MapPin, AlertTriangle, Clock } from 'lucide-react';
 import { fuelRatsApi } from '../services/fuelRatsApi';
 import { ircWebSocket, IRCMessage, IRCConnectionStatus } from '../services/ircWebSocket';
 import { IRCConnectionPanel } from './IRCConnectionPanel';
@@ -185,13 +185,14 @@ export function DispatchBoard() {
           });
         }
         
-        // Preserve cases the API no longer returns — mark as closed instead of removing
+        // Auto-remove cases the API no longer returns (closed/resolved on the API side)
+        // Clear them from seenCaseIdsRef so the case number can be reused later
         const fetchedIds = new Set(fetchedCases.map((c) => c.id));
-        const removedCases = prevCases
+        prevCases
           .filter((c) => !fetchedIds.has(c.id))
-          .map((c) => c.status === 'closed' ? c : { ...c, status: 'closed' as const });
+          .forEach((c) => seenCaseIdsRef.current.delete(c.id));
 
-        return [...updatedCases, ...removedCases];
+        return updatedCases;
       });
     });
 
@@ -200,6 +201,19 @@ export function DispatchBoard() {
       fuelRatsApi.disconnect();
     };
   }, [useApiData]);
+
+  // Sync toggledCaseIds and unreadCases when cases are removed from state
+  useEffect(() => {
+    const caseIds = new Set(cases.map((c) => c.id));
+    setToggledCaseIds((prev) => {
+      const filtered = new Set([...prev].filter((id) => caseIds.has(id)));
+      return filtered.size === prev.size ? prev : filtered;
+    });
+    setUnreadCases((prev) => {
+      const filtered = new Set([...prev].filter((id) => caseIds.has(id)));
+      return filtered.size === prev.size ? prev : filtered;
+    });
+  }, [cases]);
 
   // Effect to update rate limit display every second
   useEffect(() => {
@@ -436,11 +450,6 @@ export function DispatchBoard() {
     setCases((prev) => prev.map((c) => (c.id === caseId ? { ...c, status: 'closed' } : c)));
   };
 
-  const removeCaseFromBoard = (caseId: string) => {
-    setCases((prev) => prev.filter((c) => c.id !== caseId));
-    setToggledCaseIds((prev) => { const s = new Set(prev); s.delete(caseId); return s; });
-  };
-
   const assignRat = (caseId: string, ratName: string) => {
     if (!ratName.trim()) return;
     
@@ -641,15 +650,6 @@ export function DispatchBoard() {
                           <EyeOff className="w-4 h-4 text-red-500 animate-pulse" />
                         ) : (
                           <EyeOff className="w-4 h-4 text-slate-600" />
-                        )}
-                        {caseData.status === 'closed' && (
-                          <button
-                            onClick={(e) => { e.stopPropagation(); removeCaseFromBoard(caseData.id); }}
-                            className="p-0.5 rounded hover:bg-red-500/20 text-slate-500 hover:text-red-400 transition-colors"
-                            title="Remove closed case"
-                          >
-                            <X className="w-3.5 h-3.5" />
-                          </button>
                         )}
                       </div>
                     </div>
