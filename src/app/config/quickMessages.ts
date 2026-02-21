@@ -3,6 +3,19 @@
 // Use {clientName} for the client's name and {caseNumber} for the case number.
 // Use trMessage for an alternative message when /tr translation mode is active
 // (since /tr already prepends the client's name).
+//
+// Variants support optional weighting:
+//   Simple (equal chance):   variants: ['msg A', 'msg B', 'msg C']
+//   Weighted:                variants: [{ message: 'msg A', weight: 3 }, { message: 'msg B', weight: 1 }]
+//   Mixed:                   variants: ['msg A', { message: 'msg B', weight: 2 }]
+// Plain strings default to weight 1. Higher weight = picked more often.
+
+export interface WeightedVariant {
+  message: string;
+  weight: number;  // Relative weight; plain strings default to 1
+}
+
+export type Variant = string | WeightedVariant;
 
 export interface PlatformVariants {
   pc?: string;          // Matches "PC" (Odyssey/Horizons)
@@ -15,9 +28,9 @@ export interface PlatformVariants {
 export interface QuickMessage {
   label: string;
   message: string;                    // Default message (used as fallback)
-  variants?: string[];                // If set, one is picked at random instead of 'message'
+  variants?: Variant[];               // If set, one is picked at random (supports weights)
   trMessage?: string;                 // Alternative message when /tr is enabled
-  trVariants?: string[];              // Random variants for /tr mode
+  trVariants?: Variant[];             // Random variants for /tr mode (supports weights)
   platformVariants?: PlatformVariants;   // Platform-specific message (overrides message/variants)
   trPlatformVariants?: PlatformVariants; // Platform-specific message for /tr mode
 }
@@ -60,8 +73,8 @@ export const dispatchMessages: QuickMessageGroup = {
           label: '!PREP',
           message: '!prep {caseNumber}',
           variants: [
-            '!prep {caseNumber}',
-            '!oreo {caseNumber}'
+            {message: '!prep {caseNumber}', weight: 14},
+            {message: '!oreo {caseNumber}', weight: 1}
           ]
         },
         {
@@ -96,6 +109,10 @@ export const dispatchMessages: QuickMessageGroup = {
         {
           label: '!BEACON',
           message: '!beacon {caseNumber}',
+          variants: [
+            {message: '!beacon {caseNumber}', weight: 14},
+            {message: '!bacon {caseNumber}', weight: 1}
+          ]
         },
         {
           label: 'CRINST - O2 Time',
@@ -145,6 +162,12 @@ export const dispatchMessages: QuickMessageGroup = {
         {
           label: '!SC',
           message: '!sc {caseNumber}',
+          variants: [
+            '!sc {caseNumber}',
+            '!schop {caseNumber}',
+            '!ez {caseNumber}',
+            '!supercruise {caseNumber}'
+          ]
         },
       ],
     },
@@ -158,6 +181,10 @@ export const dispatchMessages: QuickMessageGroup = {
     {
       label: '!BEACON',
       message: '!beacon {caseNumber}',
+      variants: [
+            {message: '!beacon {caseNumber}', weight: 14},
+            {message: '!bacon {caseNumber}', weight: 1}
+          ]
     },
   ],
 };

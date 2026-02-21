@@ -4,7 +4,7 @@ import { Button } from '@/app/components/ui/button';
 import { Input } from '@/app/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/app/components/ui/popover';
 import { rescueMessages, dispatchMessages } from '../config/quickMessages';
-import type { QuickMessage } from '../config/quickMessages';
+import type { QuickMessage, Variant } from '../config/quickMessages';
 import {
   User,
   Clock,
@@ -230,8 +230,7 @@ export function CaseWindow({
       if (matchingNicks.length === 0) return;
 
       nextIndex = nextIndex % matchingNicks.length;
-      // Add ": " suffix when completing at the start of input (addressing someone)
-      const suffix = wordStart === 0 ? ': ' : ' ';
+      const suffix = ' ';
       const newValue =
         messageInput.substring(0, wordStart) + matchingNicks[nextIndex] + suffix;
 
@@ -303,7 +302,16 @@ export function CaseWindow({
   // Resolve {clientName} and {caseNumber} placeholders in quick message templates
   // Priority: platformVariants > variants > message (and tr equivalents)
   const resolveMessage = (msg: QuickMessage) => {
-    const pick = (pool: string[]) => pool[Math.floor(Math.random() * pool.length)];
+    const pick = (pool: Variant[]) => {
+      const totalWeight = pool.reduce((sum, v) => sum + (typeof v === 'string' ? 1 : v.weight), 0);
+      let rand = Math.random() * totalWeight;
+      for (const v of pool) {
+        rand -= typeof v === 'string' ? 1 : v.weight;
+        if (rand <= 0) return typeof v === 'string' ? v : v.message;
+      }
+      const last = pool[pool.length - 1];
+      return typeof last === 'string' ? last : last.message;
+    };
     const platformKey = getPlatformKey();
 
     // Determine template: platform-specific first, then random variants, then plain message
@@ -506,7 +514,7 @@ export function CaseWindow({
                                 >
                                   <div className="flex flex-col gap-1">
                                     <button
-                                      className="flex items-center gap-2 px-3 py-2 text-xs text-red-400 hover:bg-slate-800 rounded transition-colors"
+                                      className="flex items-center gap-2 px-3 py-2 text-xs text-yellow-400 hover:bg-slate-800 rounded transition-colors"
                                       onClick={() => {
                                         onAddMessage(caseData.id, `!standdown ${caseNumber} ${rat}`, '#ratchat');
                                         setOpenRatMenuId(null);
