@@ -51,7 +51,7 @@ const statusBgColors = {
 export function CaseWindow({
   caseData,
   totalCases,
-  caseIndex,
+  caseIndex: _caseIndex,
   onAddMessage,
   onStatusChange: _onStatusChange,
   onClose: _onClose,
@@ -289,6 +289,22 @@ export function CaseWindow({
 
   const caseNumber = parseInt(caseData.id.split('-')[1], 10);
 
+  // Returns the IRC nick to use in bot commands for an assigned rat.
+  // Uses the nick resolved from relay messages; falls back to quoting if name has spaces.
+  const getRatIrcNick = (cmdrName: string): string =>
+    caseData.ratIrcNicks[cmdrName] ?? (cmdrName.includes(' ') ? `"${cmdrName}"` : cmdrName);
+
+  // Short display label for platform (e.g. "PC - Odyssey" → "PC", "Xbox - Odyssey" → "XB")
+  const getPlatformShorthand = (): string => {
+    const p = caseData.platform.toLowerCase();
+    if (p.includes('legacy')) return 'Leg';
+    if (p.includes('xbox')) return 'XB';
+    if (p.includes('playstation')) return 'PS';
+    if (p.includes('horizons')) return 'PC-H';
+    if (p.includes('pc')) return 'PC';
+    return caseData.platform;
+  };
+
   // Detect platform key from caseData.platform string (e.g. "PC - Odyssey" → "pc")
   const getPlatformKey = (): 'pc' | 'xbox' | 'playstation' | 'legacy' | null => {
     const p = caseData.platform.toLowerCase();
@@ -387,13 +403,20 @@ export function CaseWindow({
               <AlertTriangle className="w-4 h-4 text-red-500 animate-pulse flex-shrink-0" />
             )}
           </div>
-          <div className="flex items-center gap-3 mt-1 text-xs text-slate-400">
-            <span className="text-slate-300 font-semibold flex items-center gap-1">
-              <Clock className="w-3 h-3" />
-              {formatElapsedTime(caseElapsedTime)}
-            </span>
-            <span>•</span>
-            <span className="text-slate-500">Window {caseIndex + 1} of {totalCases}</span>
+          <div className="flex flex-col mt-1 gap-0.5">
+            <div className="flex items-center gap-3 text-xs text-slate-400">
+              <span className="text-slate-300 font-semibold flex items-center gap-1">
+                <Clock className="w-3 h-3" />
+                {formatElapsedTime(caseElapsedTime)}
+              </span>
+              <span>•</span>
+              <span className="text-slate-400 font-medium">{getPlatformShorthand()}</span>
+              <span className="text-slate-500">•</span>
+              <span className="text-slate-400 truncate">{caseData.system}</span>
+            </div>
+            {caseData.language && (
+              <div className="text-xs text-slate-500">{caseData.language}</div>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
@@ -516,7 +539,7 @@ export function CaseWindow({
                                     <button
                                       className="flex items-center gap-2 px-3 py-2 text-xs text-yellow-400 hover:bg-slate-800 rounded transition-colors"
                                       onClick={() => {
-                                        onAddMessage(caseData.id, `!standdown ${caseNumber} ${rat}`, '#ratchat');
+                                        onAddMessage(caseData.id, `!standdown ${caseNumber} ${getRatIrcNick(rat)}`, '#ratchat');
                                         setOpenRatMenuId(null);
                                       }}
                                     >
@@ -526,7 +549,7 @@ export function CaseWindow({
                                     <button
                                       className="flex items-center gap-2 px-3 py-2 text-xs text-green-400 hover:bg-slate-800 rounded transition-colors"
                                       onClick={() => {
-                                        onAddMessage(caseData.id, `!close ${caseNumber} ${rat}`, '#ratchat');
+                                        onAddMessage(caseData.id, `!close ${caseNumber} ${getRatIrcNick(rat)}`, '#ratchat');
                                         setOpenRatMenuId(null);
                                       }}
                                     >
@@ -536,7 +559,7 @@ export function CaseWindow({
                                     <button
                                       className="flex items-center gap-2 px-3 py-2 text-xs text-red-400 hover:bg-slate-800 rounded transition-colors"
                                       onClick={() => {
-                                        onAddMessage(caseData.id, `!close -p ${caseNumber} ${rat}`, '#ratchat');
+                                        onAddMessage(caseData.id, `!close -p ${caseNumber} ${getRatIrcNick(rat)}`, '#ratchat');
                                         setOpenRatMenuId(null);
                                       }}
                                     >

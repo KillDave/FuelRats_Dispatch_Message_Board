@@ -84,8 +84,8 @@ export const dispatchMessages: QuickMessageGroup = {
         },
         {
           label: 'Modules',
-          message: '{clientName}, please disable the following modules in the right menu: Cargo Hatch, everything in the hardpoints tab',
-          trMessage: 'Please disable the following modules in the right menu: Cargo Hatch, everything in the hardpoints tab',
+          message: '{clientName}, How are those modules coming along? Remember to leave Life Support ON',
+          trMessage: 'How are those modules coming along? Remember to leave Life Support ONs',
         },
       ],
     },

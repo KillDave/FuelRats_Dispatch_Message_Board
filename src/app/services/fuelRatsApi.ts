@@ -868,6 +868,26 @@ export class FuelRatsApiService {
       };
     });
 
+    // Build CMDR name → IRC nick map from relay-parsed message senders.
+    // Normalise by lowercasing and stripping non-alphanumeric so that
+    // "Dr Leo" (CMDR) matches "Dr_Leo" (IRC nick).
+    const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const ircNicksSeen = new Set<string>(
+      messages
+        .filter((m) => !m.isSystem && m.sender !== 'Dispatch')
+        .map((m) => m.sender)
+    );
+    const ratIrcNicks: Record<string, string> = {};
+    for (const cmdrName of assignedRats) {
+      const normalizedCmdr = normalize(cmdrName);
+      for (const nick of ircNicksSeen) {
+        if (normalize(nick) === normalizedCmdr) {
+          ratIrcNicks[cmdrName] = nick;
+          break;
+        }
+      }
+    }
+
     // Format case ID with leading zero
     const caseId = `case-${attrs.commandIdentifier.toString().padStart(2, '0')}`;
 
@@ -878,9 +898,11 @@ export class FuelRatsApiService {
       ircNick: attrs.clientNick || undefined,
       system: attrs.system || 'Unknown',
       platform: this.formatPlatform(attrs.platform, attrs.expansion),
+      language: attrs.clientLanguage || undefined,
       status,
       messages,
       assignedRats,
+      ratIrcNicks,
       oxygenStatus: attrs.codeRed ? 'CRITICAL' : undefined,
       createdAt: new Date(attrs.createdAt)
     };

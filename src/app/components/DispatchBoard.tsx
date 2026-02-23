@@ -79,9 +79,11 @@ export interface Case {
   ircNick?: string; // The client's IRC nickname (may differ from clientName)
   system: string;
   platform: string;
+  language?: string;
   status: CaseStatus;
   messages: Message[];
   assignedRats: string[];
+  ratIrcNicks: Record<string, string>; // CMDR name → IRC nick, derived from relay messages
   oxygenStatus?: string;
   createdAt: Date;
 }
@@ -159,13 +161,17 @@ export function DispatchBoard() {
             }
 
             // Merge messages: keep existing + add any new ones from API
-            // Deduplicate by both id and text to handle the race condition where
-            // an IRC message may have arrived before the API quote for the same content
+            // Deduplicate by id, or by text only within a 15-second window to handle
+            // the IRC/API race where the same content can arrive via both streams.
             const existingMessageIds = new Set(existingCase.messages.map((m) => m.id));
-            const existingMessageTexts = new Set(existingCase.messages.map((m) => m.text));
-            const newMessages = fetchedCase.messages.filter(
-              (msg) => !existingMessageIds.has(msg.id) && !existingMessageTexts.has(msg.text)
-            );
+            const newMessages = fetchedCase.messages.filter((msg) => {
+              if (existingMessageIds.has(msg.id)) return false;
+              const recentDupe = existingCase.messages.some(
+                (m) => m.text === msg.text &&
+                  Math.abs(m.timestamp.getTime() - msg.timestamp.getTime()) < 5000
+              );
+              return !recentDupe;
+            });
 
             return {
               ...fetchedCase,
@@ -353,9 +359,12 @@ export function DispatchBoard() {
           // If we can't match to an original message, fall through and add as separate notice
         }
 
-        // Deduplicate by text only — catches messages that arrive via both IRC stream
-        // and API quotes (where sender names differ between the two sources)
-        const isDuplicate = c.messages.some((msg) => msg.text === displayText);
+        // Deduplicate by text within a 15-second window — catches messages that arrive
+        // via both IRC stream and API quotes without blocking legitimate repeated messages.
+        const isDuplicate = c.messages.some(
+          (msg) => msg.text === displayText &&
+            (Date.now() - msg.timestamp.getTime()) < 5000
+        );
 
         if (isDuplicate) {
           console.log('🚫 Duplicate IRC message detected, skipping:', displayText);

@@ -4,6 +4,7 @@
   "version": "0.0.1",
   "type": "module",
   "scripts": {
+    "dev": "vite --open",
     "build": "vite build"
   },
   "dependencies": {
