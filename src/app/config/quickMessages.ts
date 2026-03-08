@@ -148,6 +148,16 @@ export const dispatchMessages: QuickMessageGroup = {
       label: 'OTHERS',
       messages: [
         {
+          label: 'Dropout of SC',
+          message: 'To drop out of Super Cruise press T and then J',
+          /* platformVariants: {
+            xbox: "Also if it helps, here\'s a video to show you the process:  https://t.fuelr.at/legcr",
+            playstation: "Also if it helps, here\'s a video to show you the process:  https://t.fuelr.at/legcr",
+            legacy: "Also if it helps, here\'s a video to show you the process:  https://t.fuelr.at/legcr",    
+            default: "Also if it helps, here\'s a video to show you the process: https://t.fuelr.at/odycr"   
+          }   */ 
+        },
+        {
           label: '!MULTI',
           message: '!multi {caseNumber}',
         },
@@ -160,7 +170,7 @@ export const dispatchMessages: QuickMessageGroup = {
           message: '!rto {caseNumber}',
         },
         {
-          label: '!SC',
+          label: 'SC Hop',
           message: '!sc {caseNumber}',
           variants: [
             '!sc {caseNumber}',

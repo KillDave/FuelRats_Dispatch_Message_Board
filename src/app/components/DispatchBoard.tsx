@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { CaseWindow } from './CaseWindow';
 import { Button } from '@/app/components/ui/button';
-import { Eye, EyeOff, Sidebar, User, MapPin, AlertTriangle, Clock } from 'lucide-react';
+import { Eye, EyeOff, Sidebar, User, MapPin, AlertTriangle, Clock, LogOut } from 'lucide-react';
 import { fuelRatsApi } from '../services/fuelRatsApi';
 import { ircWebSocket, IRCMessage, IRCConnectionStatus } from '../services/ircWebSocket';
 import { IRCConnectionPanel } from './IRCConnectionPanel';
@@ -85,12 +85,13 @@ export interface Case {
   assignedRats: string[];
   ratIrcNicks: Record<string, string>; // CMDR name → IRC nick, derived from relay messages
   oxygenStatus?: string;
+  landmark?: { name: string; distance: number };
   createdAt: Date;
 }
 
 const initialCases: Case[] = [];
 
-export function DispatchBoard() {
+export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
   const [useApiData] = useState(true); // API active by default
   const [cases, setCases] = useState<Case[]>(initialCases);
   const [toggledCaseIds, setToggledCaseIds] = useState<Set<string>>(
@@ -109,6 +110,8 @@ export function DispatchBoard() {
   const [ircStatus, setIrcStatus] = useState<IRCConnectionStatus>('disconnected');
   const [ircError, setIrcError] = useState<string | undefined>();
   const [ircChannel, setIrcChannel] = useState('#fuelrats'); // Default IRC channel
+  const [ircPanelForceExpand, setIrcPanelForceExpand] = useState(false);
+  const ircFailCountRef = useRef(0);
 
   // Effect to handle API WebSocket connection when useApiData is enabled
   useEffect(() => {
@@ -258,6 +261,8 @@ export function DispatchBoard() {
       setIrcStatus(status);
       if (status === 'connected') {
         setIrcError(undefined);
+        ircFailCountRef.current = 0;
+        setIrcPanelForceExpand(false);
       }
     };
 
@@ -265,6 +270,20 @@ export function DispatchBoard() {
     ircWebSocket.onError = (error: string) => {
       setIrcError(error);
     };
+
+    // Each failed connection attempt increments the counter;
+    // after 2 failures open the sidebar and expand the IRC panel
+    ircWebSocket.onConnectionFailed = () => {
+      ircFailCountRef.current += 1;
+      if (ircFailCountRef.current >= 2) {
+        setSidebarOpen(true);
+        setIrcPanelForceExpand(true);
+      }
+    };
+
+    // Auto-connect using the saved URL (defaults to ws://localhost:8080)
+    const savedUrl = localStorage.getItem('fr_irc_ws_url') || 'ws://localhost:8080';
+    ircWebSocket.connect(savedUrl);
 
     return () => {
       ircWebSocket.disconnect();
@@ -556,6 +575,16 @@ export function DispatchBoard() {
                 }`} />
                 {isLoadingApi ? 'API: Connecting...' : useApiData ? 'API: Connected' : 'API: Disconnected'}
               </div>
+              {onLogout && (
+                <button
+                  onClick={onLogout}
+                  className="flex items-center gap-1.5 px-2 py-1 text-xs text-slate-400 hover:text-red-400 hover:bg-red-500/10 border border-slate-700 hover:border-red-500/40 rounded transition-colors"
+                  title="Sign out"
+                >
+                  <LogOut className="w-3 h-3" />
+                  Sign out
+                </button>
+              )}
             </div>
           </div>
 
@@ -676,6 +705,7 @@ export function DispatchBoard() {
                 errorMessage={ircError}
                 channel={ircChannel}
                 onChannelChange={setIrcChannel}
+                forceExpanded={ircPanelForceExpand}
               />
             </div>
           </div>

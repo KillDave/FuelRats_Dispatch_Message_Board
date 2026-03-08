@@ -74,9 +74,24 @@ export function CaseWindow({
   const [dispatchPopoverOpen, setDispatchPopoverOpen] = useState(false);
   const [subPopoverOpen, setSubPopoverOpen] = useState<Record<string, boolean>>({});
   const [openRatMenuId, setOpenRatMenuId] = useState<string | null>(null);
+  const [isScoopable, setIsScoopable] = useState<boolean | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatAreaRef = useRef<HTMLDivElement>(null);
   const messageInputRef = useRef<HTMLInputElement>(null);
+
+  // Fetch scoopable star status from EDSM
+  useEffect(() => {
+    if (!caseData.system || caseData.system === 'Unknown') return;
+    setIsScoopable(null);
+    fetch(`https://www.edsm.net/api-v1/system?systemName=${encodeURIComponent(caseData.system)}&showPrimaryStar=1`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (typeof data?.primaryStar?.isScoopable === 'boolean') {
+          setIsScoopable(data.primaryStar.isScoopable);
+        }
+      })
+      .catch(() => {});
+  }, [caseData.system]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -414,9 +429,21 @@ export function CaseWindow({
               <span className="text-slate-500">•</span>
               <span className="text-slate-400 truncate">{caseData.system}</span>
             </div>
-            {caseData.language && (
-              <div className="text-xs text-slate-500">{caseData.language}</div>
-            )}
+            <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
+              {caseData.language && (
+                <div className="text-xs text-slate-500">{caseData.language}</div>
+              )}
+              {caseData.landmark && (
+                <div className="text-xs text-white border border-red-500/60 bg-red-500/10 rounded px-1.5 py-0.5">
+                  {caseData.landmark.distance.toFixed(1)}ly from {caseData.landmark.name}
+                </div>
+              )}
+              {isScoopable !== null && (
+                <div className="text-xs text-white border border-red-500/60 bg-red-500/10 rounded px-1.5 py-0.5">
+                  {isScoopable ? 'Scoopable' : 'Not Scoopable'}
+                </div>
+              )}
+            </div>
           </div>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">

@@ -1,5 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { IRCConnectionStatus } from '../services/ircWebSocket';
+
+const IRC_URL_KEY = 'fr_irc_ws_url';
 
 interface IRCConnectionPanelProps {
   status: IRCConnectionStatus;
@@ -8,6 +10,7 @@ interface IRCConnectionPanelProps {
   errorMessage?: string;
   channel: string;
   onChannelChange: (channel: string) => void;
+  forceExpanded?: boolean;
 }
 
 export function IRCConnectionPanel({
@@ -16,13 +19,22 @@ export function IRCConnectionPanel({
   onDisconnect,
   errorMessage,
   channel,
-  onChannelChange
+  onChannelChange,
+  forceExpanded = false,
 }: IRCConnectionPanelProps) {
-  const [wsUrl, setWsUrl] = useState('ws://localhost:8080');
+  const [wsUrl, setWsUrl] = useState(() => localStorage.getItem(IRC_URL_KEY) || 'ws://localhost:8080');
   const [isExpanded, setIsExpanded] = useState(false);
+
+  // Open the panel when a failure threshold is reached externally
+  useEffect(() => {
+    if (forceExpanded) {
+      setIsExpanded(true);
+    }
+  }, [forceExpanded]);
 
   const handleConnect = () => {
     if (wsUrl.trim()) {
+      localStorage.setItem(IRC_URL_KEY, wsUrl.trim());
       onConnect(wsUrl.trim());
     }
   };
@@ -43,20 +55,20 @@ export function IRCConnectionPanel({
   const getStatusText = () => {
     switch (status) {
       case 'connected':
-        return 'IRC: CONNECTED';
+        return 'IRC Bridge: CONNECTED';
       case 'connecting':
-        return 'IRC: CONNECTING...';
+        return 'IRC Bridge: CONNECTING...';
       case 'error':
-        return 'IRC: ERROR';
+        return 'IRC Bridge: ERROR';
       default:
-        return 'IRC: DISCONNECTED';
+        return 'IRC Bridge: DISCONNECTED';
     }
   };
 
   return (
     <div className="bg-slate-800/50 border border-slate-600 rounded">
       {/* Status Bar */}
-      <div 
+      <div
         className="flex items-center justify-between px-3 py-2 cursor-pointer hover:bg-slate-700/30"
         onClick={() => setIsExpanded(!isExpanded)}
       >

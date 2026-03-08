@@ -1,4 +1,5 @@
 import { Case, CaseStatus, Message } from '../components/DispatchBoard';
+import { authService } from './authService';
 
 interface ApiQuote {
   author: string;
@@ -138,7 +139,7 @@ export class FuelRatsApiService {
   private ws: WebSocket | null = null;
   private reconnectTimer: number | null = null;
   private reconnectDelay: number = 5000; // 5 seconds
-  private apiKey: string = import.meta.env.VITE_FUELRATS_API_KEY || '';
+  private get apiKey(): string { return authService.getToken() || ''; }
   private isConnecting: boolean = false;
   private shouldReconnect: boolean = true;
   private wsProtocol: string = 'FR-JSONAPI-WS'; // FuelRats WebSocket protocol
@@ -904,6 +905,7 @@ export class FuelRatsApiService {
       assignedRats,
       ratIrcNicks,
       oxygenStatus: attrs.codeRed ? 'CRITICAL' : undefined,
+      landmark: attrs.data.landmark || undefined,
       createdAt: new Date(attrs.createdAt)
     };
   }

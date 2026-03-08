@@ -21,6 +21,7 @@ export class IRCWebSocketService {
   public onMessage: ((message: IRCMessage) => void) | null = null;
   public onStatusChange: ((status: IRCConnectionStatus) => void) | null = null;
   public onError: ((error: string) => void) | null = null;
+  public onConnectionFailed: (() => void) | null = null; // called each time a connection attempt fails
 
   /**
    * Connect to AdiIRC WebSocket server
@@ -77,6 +78,9 @@ export class IRCWebSocketService {
         this.updateStatus('error');
         if (this.onError) {
           this.onError('WebSocket connection error');
+        }
+        if (this.onConnectionFailed) {
+          this.onConnectionFailed();
         }
       };
 
