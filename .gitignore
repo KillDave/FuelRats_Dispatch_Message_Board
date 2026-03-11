@@ -42,6 +42,7 @@ start_normal_bridge.bat
 ATTRIBUTIONS.md
 bridge-package.json
 caseexample.json
+caseexample copy.json
 CONNECTION_DIAGRAM.txt
 IRC_README.md
 IRC_SETUP.md

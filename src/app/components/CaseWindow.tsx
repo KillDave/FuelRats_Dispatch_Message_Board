@@ -74,24 +74,9 @@ export function CaseWindow({
   const [dispatchPopoverOpen, setDispatchPopoverOpen] = useState(false);
   const [subPopoverOpen, setSubPopoverOpen] = useState<Record<string, boolean>>({});
   const [openRatMenuId, setOpenRatMenuId] = useState<string | null>(null);
-  const [isScoopable, setIsScoopable] = useState<boolean | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatAreaRef = useRef<HTMLDivElement>(null);
   const messageInputRef = useRef<HTMLInputElement>(null);
-
-  // Fetch scoopable star status from EDSM
-  useEffect(() => {
-    if (!caseData.system || caseData.system === 'Unknown') return;
-    setIsScoopable(null);
-    fetch(`https://www.edsm.net/api-v1/system?systemName=${encodeURIComponent(caseData.system)}&showPrimaryStar=1`)
-      .then((r) => r.json())
-      .then((data) => {
-        if (typeof data?.primaryStar?.isScoopable === 'boolean') {
-          setIsScoopable(data.primaryStar.isScoopable);
-        }
-      })
-      .catch(() => {});
-  }, [caseData.system]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -438,9 +423,9 @@ export function CaseWindow({
                   {caseData.landmark.distance.toFixed(1)}ly from {caseData.landmark.name}
                 </div>
               )}
-              {isScoopable !== null && (
+              {caseData.scoopable === true && (
                 <div className="text-xs text-white border border-red-500/60 bg-red-500/10 rounded px-1.5 py-0.5">
-                  {isScoopable ? 'Scoopable' : 'Not Scoopable'}
+                  Scoopable
                 </div>
               )}
             </div>
@@ -553,7 +538,12 @@ export function CaseWindow({
                                   <button
                                     className="w-full text-xs bg-slate-900 rounded px-2 py-1 text-slate-300 hover:bg-slate-800 transition-colors flex items-center justify-between group cursor-pointer"
                                   >
-                                    <span>{rat}</span>
+                                    <span>
+                                      {rat}
+                                      {caseData.ratIrcNicks?.[rat] && caseData.ratIrcNicks[rat].toLowerCase() !== rat.toLowerCase() && (
+                                        <span className="text-slate-500 ml-1">({caseData.ratIrcNicks[rat]})</span>
+                                      )}
+                                    </span>
                                     <ChevronDown className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" />
                                   </button>
                                 </PopoverTrigger>

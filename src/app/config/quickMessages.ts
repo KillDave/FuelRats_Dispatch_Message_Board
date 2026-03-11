@@ -53,6 +53,15 @@ export const rescueMessages: QuickMessage[] = [
     label: 'Fuel',
     message: '{clientName}, you should be receiving fuel. Thank you for calling the Fuel Rats :D. Stick around with your rat in game for some fuel management advice.',
     trMessage: 'You should be receiving fuel. Thank you for calling the Fuel Rats :D. Stick around with your rat in game for some fuel management advice.',
+    variants: [
+      "{clientName}, you should be receiving fuel. Thank you for calling the Fuel Rats :D. Stick around with your rat in game for some fuel management advice.",
+      "Fuel is on its way! Thanks so much for calling the Fuel Rats! 🐀 {clientName} please stay with your rat in-game — they'll have some great fuel management tips for you!",
+      "You're all set — fuel is incoming! Thank you for reaching out to the Fuel Rats. We'd recommend staying with your rat in-game; they'll walk you through some handy fuel management advice once you're topped up!",
+      "Fuel inbound — you're in good hands! 🎉 Thanks for calling the Fuel Rats! Once you're fuelled up, hang out with your rat in-game — they've got some awesome tips to help keep your tank from hitting zero again!",
+      "Fuel is being delivered now. Thank you for contacting the Fuel Rats. Please remain with your assigned rat in-game — they'll provide fuel management guidance once the rescue is complete.",
+      "Fuel is on its way!🐀⛽ Thanks for calling the Fuel Rats, {clientName}! Stick close to your rat in-game; they'll share some pro tips to keep you flying further between refuels!",
+      "Help is on the way — fuel should be with you shortly! We're really glad you reached out to the Fuel Rats. Once you're back up and running, your rat can share some useful advice on fuel management to help avoid this in the future. Fly safe! 🚀"
+    ]
   },
   {
     label: 'Failed',

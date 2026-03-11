@@ -86,6 +86,7 @@ export interface Case {
   ratIrcNicks: Record<string, string>; // CMDR name → IRC nick, derived from relay messages
   oxygenStatus?: string;
   landmark?: { name: string; distance: number };
+  scoopable?: boolean;
   createdAt: Date;
 }
 
@@ -105,7 +106,11 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
   const seenCaseIdsRef = useRef<Set<string>>(
     new Set(initialCases.map((c) => c.id))
   ); // Track which cases we've already seen to avoid flashing on every poll
-  
+  const scoopableFetchedRef = useRef<Map<string, string>>(new Map()); // caseId → system name last fetched
+  // Tracks the rat IRC nick used in the most recent !gofr/!go command per case,
+  // so we can correlate with MechaSqueak's response to learn nick → CMDR name
+  const lastRatCommandRef = useRef<Map<string, { nicks: string[]; time: number }>>(new Map());
+
   // IRC state
   const [ircStatus, setIrcStatus] = useState<IRCConnectionStatus>('disconnected');
   const [ircError, setIrcError] = useState<string | undefined>();
@@ -179,6 +184,9 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
             return {
               ...fetchedCase,
               messages: [...existingCase.messages, ...newMessages],
+              scoopable: existingCase.scoopable,
+              // Merge ratIrcNicks: live IRC-derived mappings take precedence over API-derived
+              ratIrcNicks: { ...fetchedCase.ratIrcNicks, ...existingCase.ratIrcNicks },
             };
           }
           
@@ -210,6 +218,30 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
       fuelRatsApi.disconnect();
     };
   }, [useApiData]);
+
+  // Fetch scoopable star status from EDSM; re-fetches if a case's system name changes
+  useEffect(() => {
+    cases.forEach((c) => {
+      const system = c.system;
+      if (!system || system === 'Unknown') return;
+      if (scoopableFetchedRef.current.get(c.id) === system) return; // already fetched for this system
+      scoopableFetchedRef.current.set(c.id, system);
+      fetch(`https://www.edsm.net/api-v1/system?systemName=${encodeURIComponent(system)}&showPrimaryStar=1`)
+        .then((r) => r.json())
+        .then((data) => {
+          if (typeof data?.primaryStar?.isScoopable === 'boolean') {
+            setCases((prev) =>
+              prev.map((pc) =>
+                pc.id === c.id && pc.system === system
+                  ? { ...pc, scoopable: data.primaryStar.isScoopable }
+                  : pc
+              )
+            );
+          }
+        })
+        .catch(() => {});
+    });
+  }, [cases]);
 
   // Sync toggledCaseIds and unreadCases when cases are removed from state
   useEffect(() => {
@@ -327,11 +359,11 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
         const fuzzyMatch = namePattern.test(effectiveNickLower) || namePattern.test(textLower);
 
         // Check if the message sender is an assigned rat (e.g. "Dr Leo" → matches IRC nick "Dr_Leo")
-        const isAssignedRat = c.assignedRats.some((ratName) => {
+        const matchedRatName = c.assignedRats.find((ratName) => {
           const normalizedRat = ratName.toLowerCase().replace(/[. _]+/g, '[. _]*');
-          // Match sender nick OR rat name mentioned in text (e.g. MechaSqueak notice: "<PlzDontKillDave> ...")
           return new RegExp(`^${normalizedRat}$`).test(effectiveNickLower) || new RegExp(normalizedRat).test(textLower);
         });
+        const isAssignedRat = !!matchedRatName;
 
         // For private notices (e.g. MechaSqueak translations), match by text content
         // since they aren't sent to a channel
@@ -410,9 +442,33 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
           return nickMatch ? nickMatch[1] : undefined;
         })();
 
+        let updatedRatIrcNicks = c.ratIrcNicks;
+
+        // PRIMARY: learn nick → CMDR from MechaSqueak's response to !gofr/!go
+        // Response format (any language): ... "CMDR Name 1" "CMDR Name 2"
+        // Zip quoted names from the response with nicks from the command by index
+        if (ircMsg.nick?.toLowerCase().includes('mechasqueak')) {
+          const lastCmd = lastRatCommandRef.current.get(c.id);
+          if (lastCmd && Date.now() - lastCmd.time < 30000) {
+            const quotedNames = [...displayText.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+            quotedNames.forEach((cmdrName, i) => {
+              const nick = lastCmd.nicks[i];
+              if (nick && c.assignedRats.includes(cmdrName) && !updatedRatIrcNicks[cmdrName]) {
+                updatedRatIrcNicks = { ...updatedRatIrcNicks, [cmdrName]: nick };
+              }
+            });
+          }
+        }
+
+        // BACKUP: learn from direct rat attribution (e.g. nick matches assigned rat name)
+        if (matchedRatName && ircMsg.nick && !updatedRatIrcNicks[matchedRatName]) {
+          updatedRatIrcNicks = { ...updatedRatIrcNicks, [matchedRatName]: ircMsg.nick };
+        }
+
         return {
           ...c,
           ircNick: updatedIrcNick,
+          ratIrcNicks: updatedRatIrcNicks,
           messages: [...c.messages, newMessage],
         };
       })
@@ -440,6 +496,14 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
       ircWebSocket.sendRaw(text);
     } else {
       ircWebSocket.sendMessage(targetChannel, text);
+
+      // Track rat nicks used in !gofr/!go commands (including -a translated variants)
+      // Format: !gofr[-a] <caseNumber> <nick1> [nick2 ...]
+      const ratCmdMatch = text.match(/^!(?:gofr|go)-?a?\s+\d+\s+(.+)/i);
+      if (ratCmdMatch) {
+        const nicks = ratCmdMatch[1].trim().split(/\s+/);
+        lastRatCommandRef.current.set(caseId, { nicks, time: Date.now() });
+      }
 
       // Add the message to this case window immediately so it appears right away
       // The deduplication logic will prevent it from showing twice when it bounces back via IRC

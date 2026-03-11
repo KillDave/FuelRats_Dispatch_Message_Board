@@ -879,12 +879,33 @@ export class FuelRatsApiService {
         .map((m) => m.sender)
     );
     const ratIrcNicks: Record<string, string> = {};
+
+    // Pass 1: exact normalized match (e.g. "Dr_Leo" → "Dr Leo")
     for (const cmdrName of assignedRats) {
       const normalizedCmdr = normalize(cmdrName);
       for (const nick of ircNicksSeen) {
         if (normalize(nick) === normalizedCmdr) {
           ratIrcNicks[cmdrName] = nick;
           break;
+        }
+      }
+    }
+
+    // Pass 2: prefix-match fallback for shortened IRC nicks (e.g. "Nat" → "Natalia Renault")
+    for (const cmdrName of assignedRats) {
+      if (ratIrcNicks[cmdrName]) continue;
+      const normalizedCmdr = normalize(cmdrName);
+      for (const nick of ircNicksSeen) {
+        const normalizedNick = normalize(nick);
+        if (normalizedNick.length >= 3 && normalizedCmdr.startsWith(normalizedNick)) {
+          // Only use if unambiguous — no other unmatched CMDR also starts with this nick
+          const isAmbiguous = assignedRats
+            .filter((r) => r !== cmdrName && !ratIrcNicks[r])
+            .some((r) => normalize(r).startsWith(normalizedNick));
+          if (!isAmbiguous) {
+            ratIrcNicks[cmdrName] = nick;
+            break;
+          }
         }
       }
     }
@@ -927,8 +948,13 @@ export class FuelRatsApiService {
     };
 
     const platformStr = platformMap[platform] || platform.toUpperCase();
-    const expansionStr = expansionMap[expansion] || expansion;
 
+    // PlayStation and Xbox don't have meaningful expansion variants — just show the platform
+    if (platform === 'ps' || platform === 'xb') {
+      return platformStr;
+    }
+
+    const expansionStr = expansionMap[expansion] || expansion;
     return `${platformStr} - ${expansionStr}`;
   }
 
