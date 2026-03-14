@@ -1,11 +1,15 @@
 import { useState, useEffect, useRef } from 'react';
 import { CaseWindow } from './CaseWindow';
+import { MessageEditorPage } from './MessageEditorPage';
 import { Button } from '@/app/components/ui/button';
 import { Eye, EyeOff, Sidebar, User, MapPin, AlertTriangle, Clock, LogOut } from 'lucide-react';
 import { fuelRatsApi } from '../services/fuelRatsApi';
 import { ircWebSocket, IRCMessage, IRCConnectionStatus } from '../services/ircWebSocket';
 import { IRCConnectionPanel } from './IRCConnectionPanel';
 import fuelRatsLogo from './image/TransparentBackgroundRatto.png';
+import { dispatchMessages, rescueMessages } from '../config/quickMessages';
+import type { QuickMessageGroup } from '../config/quickMessages';
+import { BUTTON_GROUPS_KEY, DISPATCH_CONFIG_KEY, RESCUE_CONFIG_KEY } from '../config/messageTreeHelpers';
 
 // Helper component for displaying elapsed time
 function CaseTimer({ startTime }: { startTime: Date }) {
@@ -92,7 +96,28 @@ export interface Case {
 
 const initialCases: Case[] = [];
 
+const RESCUE_DEFAULT: QuickMessageGroup = { label: 'RESCUE', messages: rescueMessages };
+const DEFAULT_BUTTON_GROUPS: QuickMessageGroup[] = [RESCUE_DEFAULT, dispatchMessages];
+
+function loadButtonGroups(): QuickMessageGroup[] {
+  try {
+    const s = localStorage.getItem(BUTTON_GROUPS_KEY);
+    if (s) return JSON.parse(s) as QuickMessageGroup[];
+  } catch {}
+  // Migrate from old separate keys
+  if (localStorage.getItem(RESCUE_CONFIG_KEY) !== null || localStorage.getItem(DISPATCH_CONFIG_KEY) !== null) {
+    const rescue = (() => { try { const s = localStorage.getItem(RESCUE_CONFIG_KEY); return s ? JSON.parse(s) : RESCUE_DEFAULT; } catch { return RESCUE_DEFAULT; } })();
+    const dispatch = (() => { try { const s = localStorage.getItem(DISPATCH_CONFIG_KEY); return s ? JSON.parse(s) : dispatchMessages; } catch { return dispatchMessages; } })();
+    const groups = [rescue, dispatch];
+    localStorage.setItem(BUTTON_GROUPS_KEY, JSON.stringify(groups));
+    return groups;
+  }
+  return DEFAULT_BUTTON_GROUPS;
+}
+
 export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
+  const [view, setView] = useState<'board' | 'editor'>('board');
+  const [buttonGroups, setButtonGroups] = useState<QuickMessageGroup[]>(loadButtonGroups);
   const [useApiData] = useState(true); // API active by default
   const [cases, setCases] = useState<Case[]>(initialCases);
   const [toggledCaseIds, setToggledCaseIds] = useState<Set<string>>(
@@ -115,7 +140,7 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
   const [ircStatus, setIrcStatus] = useState<IRCConnectionStatus>('disconnected');
   const [ircError, setIrcError] = useState<string | undefined>();
   const [ircChannel, setIrcChannel] = useState('#fuelrats'); // Default IRC channel
-  const [ircPanelForceExpand, setIrcPanelForceExpand] = useState(false);
+  const [isConnectionPanelOpen, setIsConnectionPanelOpen] = useState(false);
   const ircFailCountRef = useRef(0);
 
   // Effect to handle API WebSocket connection when useApiData is enabled
@@ -294,7 +319,7 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
       if (status === 'connected') {
         setIrcError(undefined);
         ircFailCountRef.current = 0;
-        setIrcPanelForceExpand(false);
+        setIsConnectionPanelOpen(false);
       }
     };
 
@@ -304,12 +329,11 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
     };
 
     // Each failed connection attempt increments the counter;
-    // after 2 failures open the sidebar and expand the IRC panel
+    // after 2 failures open the connection status panel
     ircWebSocket.onConnectionFailed = () => {
       ircFailCountRef.current += 1;
       if (ircFailCountRef.current >= 2) {
-        setSidebarOpen(true);
-        setIrcPanelForceExpand(true);
+        setIsConnectionPanelOpen(true);
       }
     };
 
@@ -594,6 +618,7 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
   };
 
   return (
+    <>
     <div className="size-full bg-black relative overflow-hidden flex flex-col">
       {/* Background Image */}
       <div 
@@ -623,22 +648,13 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
               </p>
             </div>
             <div className="flex items-center gap-3">
-              <div className={`flex items-center gap-2 px-3 py-1.5 rounded text-xs border ${
-                isLoadingApi
-                  ? 'bg-yellow-600/20 border-yellow-500 text-yellow-400'
-                  : useApiData
-                    ? 'bg-green-600/20 border-green-500 text-green-400'
-                    : 'bg-red-600/20 border-red-500 text-red-400'
-              }`}>
-                <div className={`w-2 h-2 rounded-full ${
-                  isLoadingApi
-                    ? 'bg-yellow-400 animate-pulse'
-                    : useApiData
-                      ? 'bg-green-400'
-                      : 'bg-red-400'
-                }`} />
-                {isLoadingApi ? 'API: Connecting...' : useApiData ? 'API: Connected' : 'API: Disconnected'}
-              </div>
+              <button
+                onClick={() => setView('editor')}
+                className="flex items-center gap-1.5 px-2 py-1 text-xs text-slate-400 hover:text-orange-400 hover:bg-orange-500/10 border border-slate-700 hover:border-orange-500/40 rounded transition-colors"
+                title="Edit quick messages"
+              >
+                Messages
+              </button>
               {onLogout && (
                 <button
                   onClick={onLogout}
@@ -759,19 +775,55 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
                 );
               })}
             </div>
-            
-            {/* IRC Connection Panel */}
-            <div className="border-t border-slate-700 p-4">
-              <IRCConnectionPanel
-                status={ircStatus}
-                onConnect={handleIRCConnect}
-                onDisconnect={handleIRCDisconnect}
-                errorMessage={ircError}
-                channel={ircChannel}
-                onChannelChange={setIrcChannel}
-                forceExpanded={ircPanelForceExpand}
-              />
+
+            {/* Connection Status Panel */}
+            <div className="border-t border-slate-700 flex-shrink-0">
+              {/* Header toggle */}
+              <div
+                className="flex items-center justify-between px-4 py-2 cursor-pointer hover:bg-slate-800/50"
+                onClick={() => setIsConnectionPanelOpen(!isConnectionPanelOpen)}
+              >
+                <div className="flex items-center gap-3">
+                  {/* API dot */}
+                  <div className="flex items-center gap-1.5">
+                    <div className={`w-2 h-2 rounded-full ${isLoadingApi ? 'bg-yellow-400 animate-pulse' : useApiData ? 'bg-green-400' : 'bg-red-400'}`} />
+                    <span className={`text-xs ${isLoadingApi ? 'text-yellow-400' : useApiData ? 'text-green-400' : 'text-red-400'}`}>API</span>
+                  </div>
+                  {/* IRC dot */}
+                  <div className="flex items-center gap-1.5">
+                    <div className={`w-2 h-2 rounded-full ${ircStatus === 'connected' ? 'bg-green-400' : ircStatus === 'connecting' ? 'bg-yellow-400 animate-pulse' : ircStatus === 'error' ? 'bg-red-400' : 'bg-slate-500'}`} />
+                    <span className={`text-xs ${ircStatus === 'connected' ? 'text-green-400' : ircStatus === 'connecting' ? 'text-yellow-400' : ircStatus === 'error' ? 'text-red-400' : 'text-slate-400'}`}>IRC</span>
+                  </div>
+                </div>
+                <span className="text-slate-500 text-xs">{isConnectionPanelOpen ? '▼︎' : '▶︎'}</span>
+              </div>
+              {/* Expanded config */}
+              {isConnectionPanelOpen && (
+                <div className="border-t border-slate-700/50 px-4 py-3 space-y-3">
+                  <div>
+                    <div className="text-xs font-semibold text-slate-400 mb-1">FuelRats API</div>
+                    <div className={`flex items-center gap-2 text-xs ${isLoadingApi ? 'text-yellow-400' : useApiData ? 'text-green-400' : 'text-red-400'}`}>
+                      <div className={`w-2 h-2 rounded-full ${isLoadingApi ? 'bg-yellow-400 animate-pulse' : useApiData ? 'bg-green-400' : 'bg-red-400'}`} />
+                      {isLoadingApi ? 'Connecting...' : useApiData ? 'Connected' : 'Disconnected'}
+                    </div>
+                  </div>
+                  <div className="border-t border-slate-700/50" />
+                  <div>
+                    <div className="text-xs font-semibold text-slate-400 mb-2">IRC Bridge</div>
+                    <IRCConnectionPanel
+                      status={ircStatus}
+                      onConnect={handleIRCConnect}
+                      onDisconnect={handleIRCDisconnect}
+                      errorMessage={ircError}
+                      channel={ircChannel}
+                      onChannelChange={setIrcChannel}
+                      embedded={true}
+                    />
+                  </div>
+                </div>
+              )}
             </div>
+
           </div>
         )}
 
@@ -800,11 +852,24 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
                 hasUnread={unreadCases.has(caseData.id)}
                 onClearUnread={clearUnread}
                 ircConnected={ircStatus === 'connected'}
+                buttonGroups={buttonGroups}
               />
             ))
           )}
         </div>
       </div>
+
+
     </div>
+
+      {view === 'editor' && (
+        <MessageEditorPage
+          onBack={() => {
+            setButtonGroups(loadButtonGroups());
+            setView('board');
+          }}
+        />
+      )}
+    </>
   );
 }

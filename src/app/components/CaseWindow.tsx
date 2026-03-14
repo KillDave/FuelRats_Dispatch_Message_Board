@@ -4,7 +4,12 @@ import { Button } from '@/app/components/ui/button';
 import { Input } from '@/app/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/app/components/ui/popover';
 import { rescueMessages, dispatchMessages } from '../config/quickMessages';
-import type { QuickMessage, Variant } from '../config/quickMessages';
+import type { QuickMessage, QuickMessageGroup, Variant } from '../config/quickMessages';
+
+const DEFAULT_BUTTON_GROUPS: QuickMessageGroup[] = [
+  { label: 'RESCUE', messages: rescueMessages },
+  dispatchMessages,
+];
 import {
   User,
   Clock,
@@ -30,6 +35,7 @@ interface CaseWindowProps {
   hasUnread?: boolean;
   onClearUnread: (caseId: string) => void;
   ircConnected: boolean;
+  buttonGroups?: QuickMessageGroup[];
 }
 
 const statusColors = {
@@ -60,6 +66,7 @@ export function CaseWindow({
   hasUnread = false,
   onClearUnread,
   ircConnected,
+  buttonGroups = DEFAULT_BUTTON_GROUPS,
 }: CaseWindowProps) {
   const [messageInput, setMessageInput] = useState('');
   const [isFlickering, setIsFlickering] = useState(false);
@@ -70,8 +77,7 @@ export function CaseWindow({
   const [activityElapsedTime, setActivityElapsedTime] = useState(0);
   const [combinedPopoverOpen, setCombinedPopoverOpen] = useState(false);
   const [translateEnabled, setTranslateEnabled] = useState(false);
-  const [rescuePopoverOpen, setRescuePopoverOpen] = useState(false);
-  const [dispatchPopoverOpen, setDispatchPopoverOpen] = useState(false);
+  const [rootPopoverOpen, setRootPopoverOpen] = useState<Record<number, boolean>>({});
   const [subPopoverOpen, setSubPopoverOpen] = useState<Record<string, boolean>>({});
   const [openRatMenuId, setOpenRatMenuId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -254,8 +260,7 @@ export function CaseWindow({
     // Close menu when user starts typing
     if (combinedPopoverOpen) {
       setCombinedPopoverOpen(false);
-      setRescuePopoverOpen(false);
-      setDispatchPopoverOpen(false);
+      setRootPopoverOpen({});
       setSubPopoverOpen({});
     }
   };
@@ -315,7 +320,7 @@ export function CaseWindow({
     return null;
   };
 
-  // Resolve {clientName} and {caseNumber} placeholders in quick message templates
+  // Resolve {clientName}, {caseNumber}, {ratCmdrNick}, {ratIrcNick} placeholders in quick message templates
   // Priority: platformVariants > variants > message (and tr equivalents)
   const resolveMessage = (msg: QuickMessage) => {
     const pick = (pool: Variant[]) => {
@@ -348,7 +353,20 @@ export function CaseWindow({
     }
 
     const clientName = caseData.ircNick || caseData.clientName;
-    return template.replace(/\{clientName\}/g, clientName).replace(/\{caseNumber\}/g, String(caseNumber));
+
+    const formatList = (items: string[]): string => {
+      if (items.length === 0) return '';
+      if (items.length === 1) return items[0];
+      return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
+    };
+    const ratCmdrNick = formatList(caseData.assignedRats.map((r) => `"${r}"`));
+    const ratIrcNick = formatList(caseData.assignedRats.map(getRatIrcNick));
+
+    return template
+      .replace(/\{clientName\}/g, clientName)
+      .replace(/\{caseNumber\}/g, String(caseNumber))
+      .replace(/\{ratCmdrNick\}/g, ratCmdrNick)
+      .replace(/\{ratIrcNick\}/g, ratIrcNick);
   };
 
   // Commands that support the -a (auto-translate) suffix
@@ -384,6 +402,40 @@ export function CaseWindow({
       }, 0);
     }
   };
+
+  const renderGroupContent = (group: QuickMessageGroup, pathKey: string) => (
+    <div className="space-y-1">
+      {group.subgroups?.map((sg, i) => {
+        const key = pathKey ? `${pathKey}-s${i}` : `s${i}`;
+        return (
+          <Popover
+            key={key}
+            open={subPopoverOpen[key] || false}
+            onOpenChange={(open) => setSubPopoverOpen((prev) => ({ ...prev, [key]: open }))}
+          >
+            <PopoverTrigger className="w-full text-xs h-8 bg-slate-900 border border-slate-600 text-white hover:bg-slate-700 rounded px-2">
+              {'>'}{sg.label}{'<'}
+            </PopoverTrigger>
+            <PopoverContent className="w-56 bg-slate-800/90 backdrop-blur-md border-slate-700 p-2" side="right" align="start">
+              {renderGroupContent(sg, key)}
+            </PopoverContent>
+          </Popover>
+        );
+      })}
+      {group.messages?.map((msg, i) => (
+        <Button
+          key={i}
+          variant="outline"
+          size="sm"
+          className="w-full text-xs h-8 bg-slate-900 border-slate-600 text-white hover:bg-slate-700"
+          onMouseDown={(e: any) => e.preventDefault()}
+          onClick={() => sendQuickMessage(resolveMessage(msg), group.keepOpen)}
+        >
+          {msg.label}
+        </Button>
+      ))}
+    </div>
+  );
 
   return (
     <div
@@ -615,83 +667,26 @@ export function CaseWindow({
                           <Zap className="w-3 h-3" />
                           Quick Message
                         </h3>
-                        <div className="space-y-1">
-                          {/* Rescue Popover */}
-                          <Popover open={rescuePopoverOpen} onOpenChange={setRescuePopoverOpen}>
-                            <PopoverTrigger className="w-full text-xs h-8 bg-slate-900 border border-slate-600 text-white hover:bg-slate-700 rounded px-2">
-                              {'>'}RESCUE{'<'}
-                            </PopoverTrigger>
-                            <PopoverContent className="w-56 bg-slate-800/90 backdrop-blur-md border-slate-700 p-2" side="right" align="start">
-                              <div className="space-y-1">
-                                {rescueMessages.map((msg) => (
-                                  <Button
-                                    key={msg.label}
-                                    variant="outline"
-                                    size="sm"
-                                    className="w-full text-xs h-8 bg-slate-900 border-slate-600 text-white hover:bg-slate-700"
-                                    onMouseDown={(e: any) => e.preventDefault()}
-                                    onClick={() => sendQuickMessage(resolveMessage(msg))}
-                                  >
-                                    {msg.label}
-                                  </Button>
-                                ))}
-                              </div>
-                            </PopoverContent>
-                          </Popover>
-
-                          {/* Dispatch Popover */}
-                          <Popover open={dispatchPopoverOpen} onOpenChange={setDispatchPopoverOpen}>
-                            <PopoverTrigger className="w-full text-xs h-8 bg-slate-900 border border-slate-600 text-white hover:bg-slate-700 rounded px-2">
-                              {'>'}{dispatchMessages.label}{'<'}
-                            </PopoverTrigger>
-                            <PopoverContent className="w-56 bg-slate-800/90 backdrop-blur-md border-slate-700 p-2" side="right" align="start">
-                              <div className="space-y-1">
-                                {/* Subgroup popovers (NORMAL, CODE RED, OTHERS) */}
-                                {dispatchMessages.subgroups?.map((subgroup) => (
-                                  <Popover
-                                    key={subgroup.label}
-                                    open={subPopoverOpen[subgroup.label] || false}
-                                    onOpenChange={(open: any) => setSubPopoverOpen((prev) => ({ ...prev, [subgroup.label]: open }))}
-                                  >
-                                    <PopoverTrigger className="w-full text-xs h-8 bg-slate-900 border border-slate-600 text-white hover:bg-slate-700 rounded px-2">
-                                      {'>'}{subgroup.label}{'<'}
-                                    </PopoverTrigger>
-                                    <PopoverContent className="w-56 bg-slate-800/90 backdrop-blur-md border-slate-700 p-2" side="right" align="start">
-                                      <div className="space-y-1">
-                                        {subgroup.messages?.map((msg) => (
-                                          <Button
-                                            key={msg.label}
-                                            variant="outline"
-                                            size="sm"
-                                            className="w-full text-xs h-8 bg-slate-900 border-slate-600 text-white hover:bg-slate-700"
-                                            onMouseDown={(e: any) => e.preventDefault()}
-                                            onClick={() => sendQuickMessage(resolveMessage(msg), subgroup.keepOpen)}
-                                          >
-                                            {msg.label}
-                                          </Button>
-                                        ))}
-                                      </div>
-                                    </PopoverContent>
-                                  </Popover>
-                                ))}
-
-                                {/* Top-level dispatch messages */}
-                                {dispatchMessages.messages?.map((msg) => (
-                                  <Button
-                                    key={msg.label}
-                                    variant="outline"
-                                    size="sm"
-                                    className="w-full text-xs h-8 bg-slate-900 border-slate-600 text-white hover:bg-slate-700"
-                                    onMouseDown={(e: any) => e.preventDefault()}
-                                    onClick={() => sendQuickMessage(resolveMessage(msg))}
-                                  >
-                                    {msg.label}
-                                  </Button>
-                                ))}
-                              </div>
-                            </PopoverContent>
-                          </Popover>
-                        </div>
+                        {buttonGroups.length === 0 ? (
+                          <div className="text-xs text-slate-600 italic">No buttons configured.</div>
+                        ) : (
+                          <div className="space-y-1">
+                            {buttonGroups.map((group, i) => (
+                              <Popover
+                                key={i}
+                                open={rootPopoverOpen[i] || false}
+                                onOpenChange={(open) => setRootPopoverOpen(prev => ({ ...prev, [i]: open }))}
+                              >
+                                <PopoverTrigger className="w-full text-xs h-8 bg-slate-900 border border-slate-600 text-white hover:bg-slate-700 rounded px-2">
+                                  {'>'}{group.label}{'<'}
+                                </PopoverTrigger>
+                                <PopoverContent className="w-56 bg-slate-800/90 backdrop-blur-md border-slate-700 p-2" side="right" align="start">
+                                  {renderGroupContent(group, `r${i}`)}
+                                </PopoverContent>
+                              </Popover>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     </div>
                   </PopoverContent>
