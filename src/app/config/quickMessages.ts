@@ -104,7 +104,7 @@ export const dispatchMessages: QuickMessageGroup = {
         {
           label: 'Modules',
           message: '{clientName}, How are those modules coming along? Remember to leave Life Support ON',
-          trMessage: 'How are those modules coming along? Remember to leave Life Support ONs',
+          trMessage: 'How are those modules coming along? Remember to leave Life Support ON',
         },
       ],
     },

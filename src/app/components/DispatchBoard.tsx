@@ -354,6 +354,17 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
 
     if ((ircMsg.type !== 'message' && ircMsg.type !== 'notice') || !ircMsg.nick || !ircMsg.text) return;
 
+    // Detect MechaSqueak nick-change notice and update ircNick immediately,
+    // before the API has a chance to reflect the new value.
+    // Format: "Caution: Client of case #7 (old name) has changed IRC nick to newNick"
+    const nickChangeMatch = ircMsg.text.match(/Client of case #(\d+) .+ has changed IRC nick to (\S+)/i);
+    if (nickChangeMatch && ircMsg.nick?.toLowerCase().includes('mechasqueak')) {
+      const caseNum = parseInt(nickChangeMatch[1], 10);
+      const newNick = nickChangeMatch[2];
+      const caseId = `case-${caseNum.toString().padStart(2, '0')}`;
+      setCases((prev) => prev.map((c) => c.id === caseId ? { ...c, ircNick: newNick } : c));
+    }
+
     const isNotice = ircMsg.type === 'notice';
 
     setCases((prev) =>
@@ -434,15 +445,17 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
           // If we can't match to an original message, fall through and add as separate notice
         }
 
-        // Deduplicate by text within a 15-second window — catches messages that arrive
-        // via both IRC stream and API quotes without blocking legitimate repeated messages.
+        // Deduplicate only against API-sourced messages — catches the IRC/API race where
+        // the same content arrives via both streams, without suppressing identical messages
+        // from different IRC users.
         const isDuplicate = c.messages.some(
-          (msg) => msg.text === displayText &&
+          (msg) => !msg.isIRC &&
+            msg.text === displayText &&
             (Date.now() - msg.timestamp.getTime()) < 5000
         );
 
         if (isDuplicate) {
-          console.log('🚫 Duplicate IRC message detected, skipping:', displayText);
+          console.log('🚫 Duplicate IRC/API message detected, skipping:', displayText);
           return c;
         }
 

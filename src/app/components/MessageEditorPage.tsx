@@ -36,6 +36,13 @@ function hasAdvancedFeatures(msg: QuickMessage) {
   return !!(msg.variants?.length || msg.trVariants?.length || msg.platformVariants || msg.trPlatformVariants);
 }
 
+/** Returns true if the message needs JSON mode (weighted variants or trPlatformVariants). */
+function forcesJsonMode(msg: QuickMessage) {
+  const hasWeightedV  = msg.variants?.some(v => typeof v !== 'string');
+  const hasWeightedTr = msg.trVariants?.some(v => typeof v !== 'string');
+  return !!(hasWeightedV || hasWeightedTr || msg.trPlatformVariants);
+}
+
 function deepCopy<T>(v: T): T {
   return JSON.parse(JSON.stringify(v));
 }
@@ -75,7 +82,12 @@ export function MessageEditorPage({ onBack }: { onBack: () => void }) {
   const [groupDraft, setGroupDraft] = useState({ label: '', keepOpen: false });
 
   const blankMsg = () => ({
-    label: '', message: '', trMessage: '',
+    label: '', message: '',
+    hasTrMessage: false, trMessage: '',
+    hasVariants: false, variantsText: '',
+    hasTrVariants: false, trVariantsText: '',
+    hasPlatformVariants: false,
+    pvPc: '', pvXbox: '', pvPlaystation: '', pvLegacy: '', pvDefault: '',
     editMode: 'simple' as 'simple' | 'json',
     jsonText: '', jsonError: null as string | null,
   });
@@ -112,12 +124,26 @@ export function MessageEditorPage({ onBack }: { onBack: () => void }) {
   const selectMessage = useCallback((rootIdx: number, groupPath: number[], msgIdx: number, groups?: QuickMessageGroup[]) => {
     const cfg = (groups ?? buttonGroups)[rootIdx];
     const msg = getGroupAtPath(cfg, groupPath).messages![msgIdx];
-    const adv = hasAdvancedFeatures(msg);
+    const useJson = forcesJsonMode(msg);
+    const pv = msg.platformVariants ?? {};
+    const variantsSimple = (msg.variants ?? []).filter((v): v is string => typeof v === 'string');
+    const trVariantsSimple = (msg.trVariants ?? []).filter((v): v is string => typeof v === 'string');
     setMsgDraft({
       label: msg.label,
       message: msg.message,
+      hasTrMessage: !!msg.trMessage,
       trMessage: msg.trMessage ?? '',
-      editMode: adv ? 'json' : 'simple',
+      hasVariants: !!(msg.variants?.length),
+      variantsText: variantsSimple.join('\n'),
+      hasTrVariants: !!(msg.trVariants?.length),
+      trVariantsText: trVariantsSimple.join('\n'),
+      hasPlatformVariants: !!msg.platformVariants,
+      pvPc: pv.pc ?? '',
+      pvXbox: pv.xbox ?? '',
+      pvPlaystation: pv.playstation ?? '',
+      pvLegacy: pv.legacy ?? '',
+      pvDefault: pv.default ?? '',
+      editMode: useJson ? 'json' : 'simple',
       jsonText: JSON.stringify(msg, null, 2),
       jsonError: null,
     });
@@ -213,18 +239,51 @@ export function MessageEditorPage({ onBack }: { onBack: () => void }) {
   };
 
   const switchToJson = () =>
-    setMsgDraft(f => ({
-      ...f, editMode: 'json', jsonError: null,
-      jsonText: JSON.stringify(
-        { label: f.label || 'Button', message: f.message, ...(f.trMessage ? { trMessage: f.trMessage } : {}) },
-        null, 2
-      ),
-    }));
+    setMsgDraft(f => {
+      const pv: Record<string, string> = {};
+      if (f.hasPlatformVariants) {
+        if (f.pvPc)          pv.pc          = f.pvPc;
+        if (f.pvXbox)        pv.xbox        = f.pvXbox;
+        if (f.pvPlaystation) pv.playstation = f.pvPlaystation;
+        if (f.pvLegacy)      pv.legacy      = f.pvLegacy;
+        if (f.pvDefault)     pv.default     = f.pvDefault;
+      }
+      const obj: Record<string, unknown> = {
+        label: f.label || 'Button',
+        message: f.message,
+        ...(f.hasTrMessage && f.trMessage ? { trMessage: f.trMessage } : {}),
+        ...(f.hasVariants && f.variantsText.trim() ? { variants: f.variantsText.split('\n').map(s => s.trim()).filter(Boolean) } : {}),
+        ...(f.hasTrVariants && f.trVariantsText.trim() ? { trVariants: f.trVariantsText.split('\n').map(s => s.trim()).filter(Boolean) } : {}),
+        ...(f.hasPlatformVariants && Object.keys(pv).length ? { platformVariants: pv } : {}),
+      };
+      return { ...f, editMode: 'json', jsonError: null, jsonText: JSON.stringify(obj, null, 2) };
+    });
 
   const switchToSimple = () => {
     try {
       const parsed = JSON.parse(msgDraft.jsonText) as QuickMessage;
-      setMsgDraft(f => ({ ...f, editMode: 'simple', jsonError: null, label: parsed.label ?? '', message: parsed.message ?? '', trMessage: parsed.trMessage ?? '' }));
+      if (forcesJsonMode(parsed)) {
+        setMsgDraft(f => ({ ...f, jsonError: 'This message has weighted variants or trPlatformVariants — keep it in JSON mode.' }));
+        return;
+      }
+      const pv = parsed.platformVariants ?? {};
+      const variantsSimple = (parsed.variants ?? []).filter((v): v is string => typeof v === 'string');
+      const trVariantsSimple = (parsed.trVariants ?? []).filter((v): v is string => typeof v === 'string');
+      setMsgDraft(f => ({
+        ...f,
+        editMode: 'simple', jsonError: null,
+        label: parsed.label ?? '',
+        message: parsed.message ?? '',
+        hasTrMessage: !!parsed.trMessage,
+        trMessage: parsed.trMessage ?? '',
+        hasVariants: !!(parsed.variants?.length),
+        variantsText: variantsSimple.join('\n'),
+        hasTrVariants: !!(parsed.trVariants?.length),
+        trVariantsText: trVariantsSimple.join('\n'),
+        hasPlatformVariants: !!parsed.platformVariants,
+        pvPc: pv.pc ?? '', pvXbox: pv.xbox ?? '', pvPlaystation: pv.playstation ?? '',
+        pvLegacy: pv.legacy ?? '', pvDefault: pv.default ?? '',
+      }));
     } catch {
       setMsgDraft(f => ({ ...f, jsonError: 'Fix JSON before switching.' }));
     }
@@ -243,10 +302,25 @@ export function MessageEditorPage({ onBack }: { onBack: () => void }) {
       }
     } else {
       if (!msgDraft.label.trim() || !msgDraft.message.trim()) return;
+      const pv: Record<string, string> = {};
+      if (msgDraft.hasPlatformVariants) {
+        if (msgDraft.pvPc)          pv.pc          = msgDraft.pvPc;
+        if (msgDraft.pvXbox)        pv.xbox        = msgDraft.pvXbox;
+        if (msgDraft.pvPlaystation) pv.playstation = msgDraft.pvPlaystation;
+        if (msgDraft.pvLegacy)      pv.legacy      = msgDraft.pvLegacy;
+        if (msgDraft.pvDefault)     pv.default     = msgDraft.pvDefault;
+      }
       entry = {
         label: msgDraft.label.trim(),
         message: msgDraft.message.trim(),
-        ...(msgDraft.trMessage.trim() ? { trMessage: msgDraft.trMessage.trim() } : {}),
+        ...(msgDraft.hasTrMessage && msgDraft.trMessage.trim() ? { trMessage: msgDraft.trMessage.trim() } : {}),
+        ...(msgDraft.hasVariants && msgDraft.variantsText.trim()
+          ? { variants: msgDraft.variantsText.split('\n').map(s => s.trim()).filter(Boolean) }
+          : {}),
+        ...(msgDraft.hasTrVariants && msgDraft.trVariantsText.trim()
+          ? { trVariants: msgDraft.trVariantsText.split('\n').map(s => s.trim()).filter(Boolean) }
+          : {}),
+        ...(msgDraft.hasPlatformVariants && Object.keys(pv).length ? { platformVariants: pv } : {}),
       };
     }
     setCfgForIdx(selected.rootIdx, updateMessageAtPath(cfgFor(selected.rootIdx), selected.groupPath, selected.msgIdx, entry));
@@ -546,6 +620,7 @@ export function MessageEditorPage({ onBack }: { onBack: () => void }) {
 
               {msgDraft.editMode === 'simple' ? (
                 <div className="space-y-4">
+                  {/* Label */}
                   <div>
                     <label className="text-xs text-slate-400 mb-1.5 block">Button label</label>
                     <Input
@@ -556,6 +631,8 @@ export function MessageEditorPage({ onBack }: { onBack: () => void }) {
                       autoFocus
                     />
                   </div>
+
+                  {/* Message */}
                   <div>
                     <label className="text-xs text-slate-400 mb-1.5 block">
                       Message{' '}
@@ -568,21 +645,109 @@ export function MessageEditorPage({ onBack }: { onBack: () => void }) {
                       onChange={(e) => setMsgDraft(f => ({ ...f, message: e.target.value }))}
                       placeholder="Message text…"
                       className="bg-slate-900 border-slate-600 text-white placeholder:text-slate-500 text-sm"
-                      rows={6}
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs text-slate-400 mb-1.5 block">
-                      TR message{' '}
-                      <span className="text-slate-600 font-normal">— used when /tr translation is active (optional)</span>
-                    </label>
-                    <Textarea
-                      value={msgDraft.trMessage}
-                      onChange={(e) => setMsgDraft(f => ({ ...f, trMessage: e.target.value }))}
-                      placeholder="Translation-mode message (optional)"
-                      className="bg-slate-900 border-slate-600 text-white placeholder:text-slate-500 text-sm"
                       rows={4}
                     />
+                  </div>
+
+                  {/* TR Message */}
+                  <div className="border border-slate-700/60 rounded-lg p-3 space-y-2">
+                    <label className="flex items-center gap-2.5 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={msgDraft.hasTrMessage}
+                        onChange={(e) => setMsgDraft(f => ({ ...f, hasTrMessage: e.target.checked }))}
+                        className="accent-orange-500 w-4 h-4 flex-shrink-0"
+                      />
+                      <span className="text-sm text-slate-300">TR message</span>
+                      <span className="text-xs text-slate-600">— alternative when /tr translation is active</span>
+                    </label>
+                    {msgDraft.hasTrMessage && (
+                      <Textarea
+                        value={msgDraft.trMessage}
+                        onChange={(e) => setMsgDraft(f => ({ ...f, trMessage: e.target.value }))}
+                        placeholder="Translation-mode message…"
+                        className="bg-slate-900 border-slate-600 text-white placeholder:text-slate-500 text-sm"
+                        rows={3}
+                      />
+                    )}
+                  </div>
+
+                  {/* Variants */}
+                  <div className="border border-slate-700/60 rounded-lg p-3 space-y-2">
+                    <label className="flex items-center gap-2.5 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={msgDraft.hasVariants}
+                        onChange={(e) => setMsgDraft(f => ({ ...f, hasVariants: e.target.checked }))}
+                        className="accent-orange-500 w-4 h-4 flex-shrink-0"
+                      />
+                      <span className="text-sm text-slate-300">Variants</span>
+                      <span className="text-xs text-slate-600">— one is picked at random each time</span>
+                    </label>
+                    {msgDraft.hasVariants && (
+                      <>
+                        <Textarea
+                          value={msgDraft.variantsText}
+                          onChange={(e) => setMsgDraft(f => ({ ...f, variantsText: e.target.value }))}
+                          placeholder={"One variant per line:\nVariant message A\nVariant message B\nVariant message C"}
+                          className="bg-slate-900 border-slate-600 text-white placeholder:text-slate-500 text-sm font-mono"
+                          rows={5}
+                        />
+                        <p className="text-[11px] text-slate-600">The main message above is used as the fallback. For weighted variants, switch to JSON mode.</p>
+                      </>
+                    )}
+                  </div>
+
+                  {/* TR Variants */}
+                  <div className="border border-slate-700/60 rounded-lg p-3 space-y-2">
+                    <label className="flex items-center gap-2.5 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={msgDraft.hasTrVariants}
+                        onChange={(e) => setMsgDraft(f => ({ ...f, hasTrVariants: e.target.checked }))}
+                        className="accent-orange-500 w-4 h-4 flex-shrink-0"
+                      />
+                      <span className="text-sm text-slate-300">TR variants</span>
+                      <span className="text-xs text-slate-600">— random variants for /tr mode</span>
+                    </label>
+                    {msgDraft.hasTrVariants && (
+                      <Textarea
+                        value={msgDraft.trVariantsText}
+                        onChange={(e) => setMsgDraft(f => ({ ...f, trVariantsText: e.target.value }))}
+                        placeholder={"One TR variant per line:\nTranslation variant A\nTranslation variant B"}
+                        className="bg-slate-900 border-slate-600 text-white placeholder:text-slate-500 text-sm font-mono"
+                        rows={4}
+                      />
+                    )}
+                  </div>
+
+                  {/* Platform Variants */}
+                  <div className="border border-slate-700/60 rounded-lg p-3 space-y-2">
+                    <label className="flex items-center gap-2.5 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={msgDraft.hasPlatformVariants}
+                        onChange={(e) => setMsgDraft(f => ({ ...f, hasPlatformVariants: e.target.checked }))}
+                        className="accent-orange-500 w-4 h-4 flex-shrink-0"
+                      />
+                      <span className="text-sm text-slate-300">Platform variants</span>
+                      <span className="text-xs text-slate-600">— different message per platform</span>
+                    </label>
+                    {msgDraft.hasPlatformVariants && (
+                      <div className="space-y-2 pt-1">
+                        {([ ['pvPc', 'PC'], ['pvXbox', 'Xbox'], ['pvPlaystation', 'PlayStation'], ['pvLegacy', 'Legacy'], ['pvDefault', 'Default fallback'] ] as const).map(([key, lbl]) => (
+                          <div key={key}>
+                            <label className="text-[11px] text-slate-500 mb-0.5 block">{lbl}</label>
+                            <Input
+                              value={msgDraft[key]}
+                              onChange={(e) => setMsgDraft(f => ({ ...f, [key]: e.target.value }))}
+                              placeholder={`${lbl} message (leave blank to skip)`}
+                              className="bg-slate-900 border-slate-600 text-white placeholder:text-slate-500 h-8 text-xs"
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
               ) : (

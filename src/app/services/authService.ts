@@ -1,6 +1,60 @@
 const TOKEN_KEY = 'fr_dispatch_token';
+const OAUTH_STATE_KEY = 'fr_oauth_state';
+
+const API_BASE = 'https://fuelrats.com';
+// ⚠️  Replace this with your registered OAuth client_id from the FuelRats team.
+// Contact admins with your redirect URI to get one.
+const CLIENT_ID = 'YOUR_CLIENT_ID_HERE';
+const REDIRECT_URI = `${window.location.origin}/callback`;
+const SCOPES = 'openid profile';
 
 export const authService = {
+  // ── OAuth2 Implicit Grant ────────────────────────────────────────────────
+
+  /** Redirect the browser to the FuelRats login/authorise page. */
+  login(): void {
+    const state = crypto.randomUUID();
+    sessionStorage.setItem(OAUTH_STATE_KEY, state);
+
+    const params = new URLSearchParams({
+      response_type: 'token',
+      client_id: CLIENT_ID,
+      redirect_uri: REDIRECT_URI,
+      scope: SCOPES,
+      state,
+    });
+
+    window.location.href = `${API_BASE}/oauth2/authorize?${params}`;
+  },
+
+  /**
+   * Call this on the /callback path to extract the token from the URL fragment.
+   * Returns the access token on success, or throws on error / state mismatch.
+   */
+  handleCallback(): string {
+    const hash = new URLSearchParams(window.location.hash.slice(1));
+
+    const error = hash.get('error');
+    if (error) {
+      throw new Error(`OAuth error: ${error} — ${hash.get('error_description') ?? ''}`);
+    }
+
+    const state = hash.get('state');
+    const savedState = sessionStorage.getItem(OAUTH_STATE_KEY);
+    sessionStorage.removeItem(OAUTH_STATE_KEY);
+    if (state !== savedState) {
+      throw new Error('OAuth state mismatch — possible CSRF attack');
+    }
+
+    const token = hash.get('access_token');
+    if (!token) throw new Error('No access_token in callback URL');
+
+    this.setToken(token);
+    return token;
+  },
+
+  // ── Token storage (used by both OAuth and manual-token fallback) ─────────
+
   getToken(): string | null {
     return localStorage.getItem(TOKEN_KEY) || null;
   },
