@@ -480,6 +480,14 @@ export function CaseWindow({
                   Scoopable
                 </div>
               )}
+              {caseData.nearestStation && (
+                <div className="text-xs text-white border border-slate-500/60 bg-slate-500/10 rounded px-1.5 py-0.5">
+                  {caseData.nearestStation.systemName
+                    ? `${caseData.nearestStation.name} in ${caseData.nearestStation.systemName} (${caseData.nearestStation.systemDistance?.toFixed(1)}ly)`
+                    : `${caseData.nearestStation.name} (${Math.round(caseData.nearestStation.distanceToArrival).toLocaleString()}ls)`
+                  }
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -492,8 +500,94 @@ export function CaseWindow({
 
       {(
         <div className="flex flex-col flex-1 min-h-0">
+
+          {/* Rat status bar */}
+          {caseData.assignedRats.length > 0 && (
+            <div className="px-3 py-2 border-b border-slate-700/60 bg-slate-900/40 flex flex-col gap-1.5 flex-shrink-0">
+              {caseData.assignedRats.map((rat) => {
+                const nick = caseData.ratIrcNicks?.[rat] ?? rat;
+                const prog = caseData.ratProgress?.[rat] ?? caseData.ratProgress?.[nick] ?? {};
+                const stages: { key: keyof typeof prog; label: string }[] = [
+                  { key: 'fr',   label: 'FR'   },
+                  { key: 'wr',   label: 'WR'   },
+                  { key: 'bc',   label: 'BC'   },
+                  { key: 'fuel', label: 'FUEL' },
+                ];
+
+                // Cascade: find the highest index with an explicit positive value;
+                // all stages below it are treated as positive too.
+                const highestPositiveIdx = stages.reduce((max, { key }, idx) => {
+                  const v = prog[key];
+                  return v === '+' || v === true ? idx : max;
+                }, -1);
+
+                return (
+                  <div key={rat} className="flex items-center gap-2 text-xs">
+                    <span className="text-slate-400 w-24 truncate flex-shrink-0" title={rat}>{nick}</span>
+                    <div className="flex items-center gap-1">
+                      {stages.map(({ key, label }, idx) => {
+                        const val = prog[key];
+                        const explicitPositive = val === '+' || val === true;
+                        const cascaded = idx < highestPositiveIdx;
+                        const isPositive = explicitPositive || cascaded;
+                        // Only show negative if not overridden by a higher positive cascade
+                        const isNegative = val === '-' && !cascaded;
+                        return (
+                          <span
+                            key={key}
+                            className={`px-1.5 py-0.5 rounded font-mono font-semibold ${
+                              isPositive
+                                ? 'bg-green-500/20 text-green-400 border border-green-500/50'
+                                : isNegative
+                                ? 'bg-red-500/20 text-red-400 border border-red-500/50'
+                                : 'bg-slate-800 text-slate-600 border border-slate-700'
+                            }`}
+                          >
+                            {label}{explicitPositive && val === '+' ? '+' : isNegative ? '-' : ''}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Pinned jump calls */}
+          {caseData.jumpCalls && Object.keys(caseData.jumpCalls).length > 0 && (
+            <div className="px-3 py-1.5 border-b border-slate-700/60 bg-slate-800/30 flex items-center gap-3 flex-wrap flex-shrink-0">
+              <span className="text-xs text-slate-500 font-semibold flex-shrink-0">Jumps:</span>
+              {Object.entries(caseData.jumpCalls)
+                .sort((a, b) => a[1].jumps - b[1].jumps)
+                .map(([nick, call]) => {
+                  const totalSecs = call.jumps * 60;
+                  const etaSecs = Math.max(0, Math.floor(totalSecs - (Date.now() - call.timestamp.getTime()) / 1000));
+                  const arrived = etaSecs <= 0;
+                  const mins = Math.floor(etaSecs / 60);
+                  const secs = etaSecs % 60;
+                  const countdownStr = `${mins}:${secs.toString().padStart(2, '0')}`;
+                  // Red (hue 0) when first reported, green (hue 120) at zero
+                  const pct = totalSecs > 0 ? 1 - etaSecs / totalSecs : 1;
+                  const hue = Math.round(pct * 120);
+                  const timerColor = `hsl(${hue}, 80%, 55%)`;
+                  return (
+                    <span key={nick} className="text-xs" title={call.text}>
+                      <span className="text-slate-400">{nick}</span>
+                      <span className="text-orange-400 font-bold ml-1">{call.jumps}j</span>
+                      {!arrived && (
+                        <span className="ml-1 font-mono" style={{ color: timerColor }}>
+                          ({countdownStr})
+                        </span>
+                      )}
+                    </span>
+                  );
+                })}
+            </div>
+          )}
+
           {/* Messages */}
-          <div 
+          <div
             className="flex-1 overflow-y-auto p-4 min-h-0"
             ref={chatAreaRef}
             onClick={handleChatAreaClick}

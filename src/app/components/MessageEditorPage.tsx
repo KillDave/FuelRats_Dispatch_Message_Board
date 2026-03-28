@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import { Button } from '@/app/components/ui/button';
 import { Input } from '@/app/components/ui/input';
 import { Textarea } from '@/app/components/ui/textarea';
@@ -21,6 +21,7 @@ import {
 import {
   ArrowLeft, Plus, Trash2, ChevronDown, ChevronRight,
   ArrowUp, ArrowDown, RotateCcw, MessageSquare, Folder, FolderOpen,
+  Download, Upload,
 } from 'lucide-react';
 
 // ── Types ───────────────────────────────────────────────────────
@@ -227,6 +228,40 @@ export function MessageEditorPage({ onBack }: { onBack: () => void }) {
     const s = new Set<string>(['0-root', '1-root']);
     defaults[1]?.subgroups?.forEach((_, i) => s.add(`1-${i}`));
     setExpanded(s);
+  };
+
+  const importRef = useRef<HTMLInputElement>(null);
+
+  const exportConfig = () => {
+    const blob = new Blob([JSON.stringify(buttonGroups, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'dispatch-messages.json';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const importConfig = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const parsed = JSON.parse(ev.target?.result as string);
+        if (!Array.isArray(parsed) || !parsed.every(g => typeof g === 'object' && 'label' in g)) {
+          alert('Invalid file: expected an array of message groups.');
+          return;
+        }
+        if (!window.confirm('Replace all current messages with the imported config?')) return;
+        setButtonGroups(parsed as QuickMessageGroup[]);
+        setSelected(null);
+      } catch {
+        alert('Failed to parse JSON file.');
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
   };
 
   // ── Edit panel handlers ───────────────────────────────────────
@@ -457,13 +492,30 @@ export function MessageEditorPage({ onBack }: { onBack: () => void }) {
           <h1 className="text-base font-semibold text-white">Message Editor</h1>
           <span className="text-xs text-slate-500">· Configure your dispatch popover buttons</span>
         </div>
-        <button
-          onClick={resetToDefaults}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-slate-400 hover:text-amber-400 hover:bg-amber-500/10 border border-slate-600 hover:border-amber-500/40 rounded transition-colors"
-        >
-          <RotateCcw className="w-3.5 h-3.5" />
-          Reset to Defaults
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={exportConfig}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-slate-400 hover:text-green-400 hover:bg-green-500/10 border border-slate-600 hover:border-green-500/40 rounded transition-colors"
+          >
+            <Download className="w-3.5 h-3.5" />
+            Export
+          </button>
+          <button
+            onClick={() => importRef.current?.click()}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-slate-400 hover:text-blue-400 hover:bg-blue-500/10 border border-slate-600 hover:border-blue-500/40 rounded transition-colors"
+          >
+            <Upload className="w-3.5 h-3.5" />
+            Import
+          </button>
+          <input ref={importRef} type="file" accept=".json,application/json" className="hidden" onChange={importConfig} />
+          <button
+            onClick={resetToDefaults}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-slate-400 hover:text-amber-400 hover:bg-amber-500/10 border border-slate-600 hover:border-amber-500/40 rounded transition-colors"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            Reset to Defaults
+          </button>
+        </div>
       </div>
 
       {/* Body */}
