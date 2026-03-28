@@ -912,6 +912,50 @@ export class FuelRatsApiService {
 
     // Format case ID with leading zero
     const caseId = `case-${attrs.commandIdentifier.toString().padStart(2, '0')}`;
+    const caseNum = attrs.commandIdentifier;
+
+    // Scan quote messages for rat progress and jump calls
+    type RatStage = { fr?: '+' | '-'; wr?: '+' | '-'; bc?: '+' | '-'; fuel?: boolean };
+    const ratProgress: Record<string, RatStage> = {};
+    const jumpCalls: Record<string, { jumps: number; text: string; timestamp: Date }> = {};
+
+    const statusPatterns: [RegExp, keyof RatStage, '+' | '-' | true][] = [
+      [/\bfr\s*\+/i,        'fr',   '+'],
+      [/\bfr\s*-/i,         'fr',   '-'],
+      [/\b(?:wr|tm)\s*\+/i, 'wr',   '+'],
+      [/\b(?:wr|tm)\s*-/i,  'wr',   '-'],
+      [/\bbc\s*\+/i,        'bc',   '+'],
+      [/\bbc\s*-/i,         'bc',   '-'],
+      [/\bfuel\s*\+/i,      'fuel', true],
+    ];
+
+    const jumpPattern = new RegExp(`#${caseNum}\\s+(\\d+)j\\b`, 'i');
+
+    for (const msg of messages) {
+      if (msg.isSystem || !msg.sender || !msg.text) continue;
+      const text = msg.text;
+      const sender = msg.sender;
+
+      // Jump calls
+      const jumpMatch = text.match(jumpPattern);
+      if (jumpMatch) {
+        jumpCalls[sender] = { jumps: parseInt(jumpMatch[1], 10), text, timestamp: msg.timestamp };
+      }
+
+      // Status patterns
+      const current = ratProgress[sender] ?? {};
+      const updated = { ...current };
+      const fuelAlreadyClaimed = Object.values(ratProgress).some((p) => p.fuel);
+      let changed = false;
+      for (const [pattern, key, value] of statusPatterns) {
+        if (pattern.test(text)) {
+          if (key === 'fuel' && fuelAlreadyClaimed) continue;
+          (updated as Record<string, unknown>)[key] = value;
+          changed = true;
+        }
+      }
+      if (changed) ratProgress[sender] = updated;
+    }
 
     return {
       id: caseId,
@@ -927,6 +971,8 @@ export class FuelRatsApiService {
       ratIrcNicks,
       oxygenStatus: attrs.codeRed ? 'CRITICAL' : undefined,
       landmark: attrs.data.landmark || undefined,
+      ratProgress: Object.keys(ratProgress).length > 0 ? ratProgress : undefined,
+      jumpCalls: Object.keys(jumpCalls).length > 0 ? jumpCalls : undefined,
       createdAt: new Date(attrs.createdAt)
     };
   }
@@ -942,8 +988,9 @@ export class FuelRatsApiService {
     };
 
     const expansionMap: Record<string, string> = {
-      horizons4: 'Odyssey',
-      horizons3: 'Horizons',
+      odyssey: 'Odyssey',
+      horizons4: 'Horizons',
+      horizons3: 'Legacy',
       legacy: 'Legacy'
     };
 

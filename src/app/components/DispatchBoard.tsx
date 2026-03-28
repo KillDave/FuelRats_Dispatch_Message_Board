@@ -91,6 +91,14 @@ export interface Case {
   oxygenStatus?: string;
   landmark?: { name: string; distance: number };
   scoopable?: boolean;
+  nearestStation?: { name: string; distanceToArrival: number; type: string; systemName?: string; systemDistance?: number };
+  ratProgress?: Record<string, {
+    fr?: '+' | '-';
+    wr?: '+' | '-';
+    bc?: '+' | '-';
+    fuel?: boolean;
+  }>;
+  jumpCalls?: Record<string, { jumps: number; text: string; timestamp: Date }>;
   createdAt: Date;
 }
 
@@ -132,6 +140,7 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
     new Set(initialCases.map((c) => c.id))
   ); // Track which cases we've already seen to avoid flashing on every poll
   const scoopableFetchedRef = useRef<Map<string, string>>(new Map()); // caseId → system name last fetched
+  const nearestStationFetchedRef = useRef<Map<string, string>>(new Map()); // caseId → system name last fetched
   // Tracks the rat IRC nick used in the most recent !gofr/!go command per case,
   // so we can correlate with MechaSqueak's response to learn nick → CMDR name
   const lastRatCommandRef = useRef<Map<string, { nicks: string[]; time: number }>>(new Map());
@@ -210,6 +219,9 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
               ...fetchedCase,
               messages: [...existingCase.messages, ...newMessages],
               scoopable: existingCase.scoopable,
+              nearestStation: existingCase.nearestStation,
+              ratProgress: existingCase.ratProgress,
+              jumpCalls: existingCase.jumpCalls,
               // Merge ratIrcNicks: live IRC-derived mappings take precedence over API-derived
               ratIrcNicks: { ...fetchedCase.ratIrcNicks, ...existingCase.ratIrcNicks },
             };
@@ -262,6 +274,74 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
                   : pc
               )
             );
+          }
+        })
+        .catch(() => {});
+    });
+  }, [cases]);
+
+  // Fetch nearest station from EDSM; re-fetches if a case's system name changes.
+  // Falls back to a 50ly sphere search if the rescue system has no stations.
+  useEffect(() => {
+    cases.forEach((c) => {
+      const system = c.system;
+      if (!system || system === 'Unknown') return;
+      if (nearestStationFetchedRef.current.get(c.id) === system) return;
+      nearestStationFetchedRef.current.set(c.id, system);
+
+      fetch(`https://www.edsm.net/api-system-v1/stations?systemName=${encodeURIComponent(system)}`)
+        .then((r) => r.json())
+        .then(async (data) => {
+          const stations: { name: string; distanceToArrival: number; type: string }[] =
+            data?.stations ?? [];
+
+          if (stations.length > 0) {
+            const nearest = stations.reduce((a, b) =>
+              a.distanceToArrival <= b.distanceToArrival ? a : b
+            );
+            setCases((prev) =>
+              prev.map((pc) =>
+                pc.id === c.id && pc.system === system
+                  ? { ...pc, nearestStation: { name: nearest.name, distanceToArrival: nearest.distanceToArrival, type: nearest.type } }
+                  : pc
+              )
+            );
+            return;
+          }
+
+          // No stations in system — search nearby systems within 50ly
+          const sphereRes = await fetch(
+            `https://www.edsm.net/api-v1/sphere-systems?systemName=${encodeURIComponent(system)}&radius=50&showInformation=1`
+          );
+          const nearbySystems: { name: string; distance: number; information?: { population?: number } }[] =
+            await sphereRes.json();
+
+          // Filter to populated systems (likely to have stations), sort by distance
+          const candidates = nearbySystems
+            .filter((s) => (s.information?.population ?? 0) > 0)
+            .sort((a, b) => a.distance - b.distance);
+
+          for (const candidate of candidates) {
+            const stnRes = await fetch(
+              `https://www.edsm.net/api-system-v1/stations?systemName=${encodeURIComponent(candidate.name)}`
+            );
+            const stnData = await stnRes.json();
+            const nearbyStations: { name: string; distanceToArrival: number; type: string }[] =
+              stnData?.stations ?? [];
+
+            if (nearbyStations.length > 0) {
+              const nearest = nearbyStations.reduce((a, b) =>
+                a.distanceToArrival <= b.distanceToArrival ? a : b
+              );
+              setCases((prev) =>
+                prev.map((pc) =>
+                  pc.id === c.id && pc.system === system
+                    ? { ...pc, nearestStation: { name: nearest.name, distanceToArrival: nearest.distanceToArrival, type: nearest.type, systemName: candidate.name, systemDistance: candidate.distance } }
+                    : pc
+                )
+              );
+              return;
+            }
           }
         })
         .catch(() => {});
@@ -502,10 +582,53 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
           updatedRatIrcNicks = { ...updatedRatIrcNicks, [matchedRatName]: ircMsg.nick };
         }
 
+        // Detect jump calls: "#N Xj [optional text]"
+        let updatedJumpCalls = c.jumpCalls ?? {};
+        const caseNum = parseInt(c.id.split('-')[1], 10);
+        const jumpMatch = displayText.match(new RegExp(`#${caseNum}\\s+(\\d+)j\\b`, 'i'));
+        if (jumpMatch && ircMsg.nick) {
+          updatedJumpCalls = {
+            ...updatedJumpCalls,
+            [ircMsg.nick]: { jumps: parseInt(jumpMatch[1], 10), text: displayText, timestamp: ircMsg.timestamp },
+          };
+        }
+
+        // Detect rat status reports: fr±, wr±, sys+, inst±, bc±, fuel+
+        let updatedRatProgress = c.ratProgress ?? {};
+        const ratKey = matchedRatName ?? ircMsg.nick;
+        if (ratKey) {
+          const current = updatedRatProgress[ratKey] ?? {};
+          const updated = { ...current };
+          const statusPatterns: [RegExp, keyof typeof updated, '+' | '-' | true][] = [
+            [/\bfr\s*\+/i,          'fr',   '+'],
+            [/\bfr\s*-/i,           'fr',   '-'],
+            [/\b(?:wr|tm)\s*\+/i,   'wr',   '+'],
+            [/\b(?:wr|tm)\s*-/i,    'wr',   '-'],
+            [/\bbc\s*\+/i,          'bc',   '+'],
+            [/\bbc\s*-/i,           'bc',   '-'],
+            [/\bfuel\s*\+/i,        'fuel', true],
+          ];
+          // fuel is a case-level first-delivery flag — only the first rat to report it is marked
+          const fuelAlreadyClaimed = Object.values(updatedRatProgress).some((p) => p.fuel);
+          let changed = false;
+          for (const [pattern, key, value] of statusPatterns) {
+            if (pattern.test(displayText)) {
+              if (key === 'fuel' && fuelAlreadyClaimed) continue;
+              (updated as Record<string, unknown>)[key] = value;
+              changed = true;
+            }
+          }
+          if (changed) {
+            updatedRatProgress = { ...updatedRatProgress, [ratKey]: updated };
+          }
+        }
+
         return {
           ...c,
           ircNick: updatedIrcNick,
           ratIrcNicks: updatedRatIrcNicks,
+          jumpCalls: updatedJumpCalls,
+          ratProgress: updatedRatProgress,
           messages: [...c.messages, newMessage],
         };
       })
