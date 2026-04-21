@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html>
+<head>
+<script>
+  var params = new URLSearchParams(window.location.search);
+  var token = params.get('access_token');
+  if (token) {
+    localStorage.setItem('fr_dispatch_token', token);
+  }
+  window.location.replace('/');
+</script>
+</head>
+<body></body>
+</html>
