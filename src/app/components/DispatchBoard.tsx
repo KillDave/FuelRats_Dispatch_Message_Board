@@ -691,6 +691,20 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
     });
   };
 
+  const setMessageTranslation = (caseId: string, messageId: string, translation: string) => {
+    setCases((prev) =>
+      prev.map((c) => {
+        if (c.id !== caseId) return c;
+        return {
+          ...c,
+          messages: c.messages.map((m) =>
+            m.id === messageId ? { ...m, translation } : m
+          ),
+        };
+      })
+    );
+  };
+
   const updateCaseStatus = (caseId: string, status: CaseStatus) => {
     setCases((prev) =>
       prev.map((c) => (c.id === caseId ? { ...c, status } : c))
@@ -890,7 +904,7 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
                         </div>
                         {caseData.assignedRats.length > 0 && (
                           <div className={`text-xs mt-1 ${isVisible ? 'text-slate-500' : 'text-slate-600'}`}>
-                            Rats: {caseData.assignedRats.join(', ')}
+                            Rats: {caseData.assignedRats.map(r => caseData.ratIrcNicks?.[r] ?? r).join(', ')}
                           </div>
                         )}
                       </div>
@@ -989,6 +1003,7 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
                 onClearUnread={clearUnread}
                 ircConnected={ircStatus === 'connected'}
                 buttonGroups={buttonGroups}
+                onSetTranslation={setMessageTranslation}
               />
             ))
           )}

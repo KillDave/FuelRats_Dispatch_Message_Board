@@ -135,7 +135,7 @@ interface WSEventData {
 
 export class FuelRatsApiService {
   private wsUrl = 'wss://api.fuelrats.com';
-  private apiUrl = 'https://fuelrats.com/api/fr/rescues';
+  private apiUrl = 'https://api.fuelrats.com/rescues';
   private ws: WebSocket | null = null;
   private reconnectTimer: number | null = null;
   private reconnectDelay: number = 5000; // 5 seconds
@@ -155,7 +155,10 @@ export class FuelRatsApiService {
   
   // Cache for active rescues (to merge WebSocket updates)
   private activeCases: Map<string, Case> = new Map();
-  
+
+  // Per-rescue rat ID → CMDR name map, used for /nicknames API lookups
+  private rescueRatIdMaps: Map<string, Map<string, string>> = new Map();
+
   // Rate limit tracking
   public rateLimitRemaining: number = 0;
   public rateLimitTotal: number = 0;
@@ -211,12 +214,15 @@ export class FuelRatsApiService {
         this.activeCases.clear();
         cases.forEach(c => this.activeCases.set(c.id, c));
         console.log('💾 Cached', this.activeCases.size, 'cases');
-        
+
         // Send initial data to callback
         if (this.onUpdateCallback) {
           console.log('📤 Sending initial data to callback');
           this.onUpdateCallback(cases);
         }
+
+        // Async nickname resolution for any unmatched rats
+        cases.forEach(c => this.resolveUnmatchedNicks(c));
         
         // STEP 2: Now establish WebSocket for real-time updates
         console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
@@ -419,53 +425,20 @@ export class FuelRatsApiService {
       return;
     }
 
-    // Use the exact same path format as the REST API
-    // Format: ["GET", "/api/fr/rescues?filter[status][ne]=closed&sort=-createdAt", {}, {}]
-    const path = '/api/fr/rescues?filter[status][ne]=closed&sort=-createdAt';
+    // Correct WS format: [state, endpoint, query, body]
     const getRescuesMessage = [
-      'GET',
-      path,
-      {},
+      'rescues_initial',
+      'rescues',
+      { filter: JSON.stringify({ status: { ne: 'closed' } }), sort: '-createdAt' },
       {}
     ];
-    
-    console.log('📋 Request Details:');
-    console.log('   Path:', path);
-    console.log('   Message:', JSON.stringify(getRescuesMessage));
-    console.log('   WebSocket State:', this.getReadyStateString(this.ws.readyState));
-    
+
     try {
       this.ws.send(JSON.stringify(getRescuesMessage));
-      console.log('✅ Request sent successfully');
+      console.log('✅ Rescue list request sent');
     } catch (error) {
       console.error('❌ Error sending request:', error);
     }
-    
-    // Set up periodic polling through WebSocket
-    // Poll every 10 seconds for updates
-    if (this.pollingInterval) {
-      console.log('🧹 Clearing existing polling interval');
-      clearInterval(this.pollingInterval);
-    }
-    
-    console.log('⏰ Setting up polling interval (10 seconds)');
-    this.pollingInterval = window.setInterval(() => {
-      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-        console.log('🔄 Polling for rescue updates...');
-        console.log('   Time:', new Date().toISOString());
-        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-        try {
-          this.ws.send(JSON.stringify(getRescuesMessage));
-          console.log('✅ Poll request sent');
-        } catch (error) {
-          console.error('❌ Error sending poll request:', error);
-        }
-      } else {
-        console.warn('⚠️  Skipping poll - WebSocket not open');
-        console.warn('   State:', this.ws ? this.getReadyStateString(this.ws.readyState) : 'null');
-      }
-    }, 10000);
   }
 
   /**
@@ -520,89 +493,19 @@ export class FuelRatsApiService {
       
       // WebSocket is now ready for real-time updates
       // (Initial data was already fetched from REST API)
-      console.log('✅ WebSocket ready for real-time updates');
-      console.log('ℹ️  WebSocket will notify of rescue changes automatically');
+      // Subscribe to real-time events
+      this.ws!.send(JSON.stringify(['subscribe', 'events', 'subscribe', {}]));
+      console.log('📋 Subscribed to events, requesting rescue list...');
+      this.requestRescues();
       return;
     }
 
     // Handle rescue create and update events
     // Format: [eventType, userId, rescueId, dataObject]
     if (eventType === 'fuelrats.rescuecreate' || eventType === 'fuelrats.rescueupdate') {
-      const userId = statusCode; // Actually the user ID, not a status code
-      const rescueId = eventData; // Actually the rescue ID
-      const dataObject = eventMeta; // Actually the data object
-      
-      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-      console.log(eventType === 'fuelrats.rescuecreate' ? '🆕 Rescue Created' : '🔄 Rescue Updated');
-      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-      console.log('   Event:', eventType);
-      console.log('   User ID:', userId);
-      console.log('   Rescue ID:', rescueId);
-      
-      // The rescue data is in dataObject
-      if (dataObject && dataObject.data) {
-        // Check if rescue is closed/completed (paperwork done)
-        const rescueStatus = dataObject.data.attributes?.status;
-        const rescueOutcome = dataObject.data.attributes?.outcome;
-        
-        console.log('   Status:', rescueStatus);
-        console.log('   Outcome:', rescueOutcome);
-        
-        // If the rescue is closed, remove it from active cases
-        if (rescueStatus === 'closed') {
-          console.log('📋 Rescue marked as closed - removing from active cases');
-          
-          // Find the case by API ID
-          const caseToRemove = Array.from(this.activeCases.values()).find(c => c.apiId === rescueId);
-          
-          if (caseToRemove) {
-            this.activeCases.delete(caseToRemove.id);
-            console.log('🗑️  Removed case', caseToRemove.id, '- total cases:', this.activeCases.size);
-            
-            // Send updated list to callback
-            if (this.onUpdateCallback) {
-              const allCases = Array.from(this.activeCases.values());
-              console.log('📤 Sending', allCases.length, 'active cases to callback');
-              this.onUpdateCallback(allCases);
-            }
-          } else {
-            console.log('ℹ️  Case not in cache (already removed or never added)');
-          }
-          
-          return;
-        }
-        
-        // Transform and update active rescue
-        const apiResponse: ApiResponse = {
-          jsonapi: dataObject.jsonapi || { version: '1.0', meta: { apiVersion: '3.1.0' } },
-          meta: dataObject.meta || { apiVersion: '3.1.0' },
-          data: [dataObject.data],
-          included: dataObject.included || [],
-          links: dataObject.links || {}
-        };
-        
-        const transformedCases = this.transformApiData(apiResponse);
-        console.log('✅ Transformed rescue data');
-        console.log('   Case ID:', transformedCases[0]?.id);
-        console.log('   Client:', transformedCases[0]?.clientName);
-        console.log('   Status:', transformedCases[0]?.status);
-        
-        // Update cache
-        if (transformedCases.length > 0) {
-          const caseData = transformedCases[0];
-          this.activeCases.set(caseData.id, caseData);
-          console.log('💾 Cache updated - total cases:', this.activeCases.size);
-          
-          // Send ALL cases to callback
-          if (this.onUpdateCallback) {
-            const allCases = Array.from(this.activeCases.values());
-            console.log('📤 Sending all', allCases.length, 'cases to callback');
-            this.onUpdateCallback(allCases);
-          }
-        }
-      } else {
-        console.warn('⚠️  No data in rescue event');
-      }
+      const rescueId = eventData; // rescue UUID
+      console.log(eventType === 'fuelrats.rescuecreate' ? '🆕 Rescue Created:' : '🔄 Rescue Updated:', rescueId);
+      this.fetchRescueById(rescueId);
       return;
     }
 
@@ -680,6 +583,87 @@ export class FuelRatsApiService {
   /**
    * Fetch active rescues from the REST API (used for initial load and refresh)
    */
+  private async fetchRescueById(id: string): Promise<void> {
+    try {
+      const headers: HeadersInit = { 'Accept': 'application/json' };
+      if (this.apiKey) headers['Authorization'] = `Bearer ${this.apiKey}`;
+      const response = await fetch(`${this.apiUrl}/${id}`, { headers });
+      if (!response.ok) {
+        if (response.status === 404) {
+          // Rescue gone — remove from cache
+          const existing = Array.from(this.activeCases.values()).find(c => c.apiId === id);
+          if (existing) {
+            this.activeCases.delete(existing.id);
+            if (this.onUpdateCallback) this.onUpdateCallback(Array.from(this.activeCases.values()));
+          }
+        }
+        return;
+      }
+      const data = await response.json();
+      const apiResponse: ApiResponse = { ...data, data: [data.data], included: data.included || [] };
+      const cases = this.transformApiData(apiResponse);
+      if (cases.length > 0) {
+        const caseData = cases[0];
+        if (caseData.status === 'inactive' || (data.data.attributes?.status === 'closed')) {
+          const existing = Array.from(this.activeCases.values()).find(c => c.apiId === id);
+          if (existing) this.activeCases.delete(existing.id);
+        } else {
+          this.activeCases.set(caseData.id, caseData);
+          this.resolveUnmatchedNicks(caseData);
+        }
+        if (this.onUpdateCallback) this.onUpdateCallback(Array.from(this.activeCases.values()));
+      }
+    } catch (error) {
+      console.error('❌ Error fetching rescue by ID:', error);
+    }
+  }
+
+  private async lookupNickname(nick: string): Promise<string | null> {
+    const headers: HeadersInit = { 'Accept': 'application/json' };
+    if (this.apiKey) headers['Authorization'] = `Bearer ${this.apiKey}`;
+    try {
+      const resp = await fetch(`https://api.fuelrats.com/nicknames?nick=${encodeURIComponent(nick)}`, { headers });
+      if (!resp.ok) return null;
+      const json = await resp.json();
+      return json.data?.[0]?.relationships?.rat?.data?.id ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  private async resolveUnmatchedNicks(caseData: Case): Promise<void> {
+    if (!caseData.apiId) return;
+    const ratIdMap = this.rescueRatIdMaps.get(caseData.apiId);
+    if (!ratIdMap || ratIdMap.size === 0) return;
+
+    const unmatchedRats = caseData.assignedRats.filter((r) => !caseData.ratIrcNicks[r]);
+    if (unmatchedRats.length === 0) return;
+
+    const activeNicks = new Set([
+      ...Object.keys(caseData.jumpCalls ?? {}),
+      ...Object.keys(caseData.ratProgress ?? {}),
+    ]);
+    const claimedNicks = new Set(Object.values(caseData.ratIrcNicks));
+    const unclaimedActiveNicks = [...activeNicks].filter((n) => !claimedNicks.has(n));
+    if (unclaimedActiveNicks.length === 0) return;
+
+    let updated = false;
+    for (const nick of unclaimedActiveNicks) {
+      const ratId = await this.lookupNickname(nick);
+      if (!ratId) continue;
+      const cmdrName = ratIdMap.get(ratId);
+      if (cmdrName && !caseData.ratIrcNicks[cmdrName]) {
+        caseData.ratIrcNicks[cmdrName] = nick;
+        updated = true;
+        console.log(`🔍 Nickname lookup: ${nick} → ${cmdrName} (rat ${ratId})`);
+      }
+    }
+
+    if (updated && this.onUpdateCallback) {
+      this.onUpdateCallback(Array.from(this.activeCases.values()));
+    }
+  }
+
   async fetchActiveRescues(): Promise<Case[]> {
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     console.log('🌐 Fetching Active Rescues (REST API)');
@@ -687,9 +671,9 @@ export class FuelRatsApiService {
     
     try {
       // Filter for non-closed rescues, sorted by newest first
-      // Using exact format from FuelRats website
+      // v4 API uses JSON filter format
       const params = new URLSearchParams({
-        'filter[status][ne]': 'closed',
+        'filter': JSON.stringify({ status: { ne: 'closed' } }),
         'sort': '-createdAt'
       });
 
@@ -697,7 +681,6 @@ export class FuelRatsApiService {
         'Accept': 'application/json',
       };
 
-      // Add authentication header if API key is set
       if (this.apiKey) {
         headers['Authorization'] = `Bearer ${this.apiKey}`;
       }
@@ -779,7 +762,15 @@ export class FuelRatsApiService {
       });
     }
 
-    return data.map((rescue) => this.transformRescue(rescue, ratMap));
+    return data.map((rescue) => {
+      const rescueRatMap = new Map<string, string>();
+      rescue.relationships.rats.data.forEach((ratRef) => {
+        const name = ratMap.get(ratRef.id);
+        if (name) rescueRatMap.set(ratRef.id, name);
+      });
+      this.rescueRatIdMaps.set(rescue.id, rescueRatMap);
+      return this.transformRescue(rescue, ratMap);
+    });
   }
 
   /**
@@ -955,6 +946,16 @@ export class FuelRatsApiService {
         }
       }
       if (changed) ratProgress[sender] = updated;
+    }
+
+    // Pass 3: if exactly 1 rat is unmatched and exactly 1 "active" nick
+    // (one that sent a jump call or status update) is unclaimed, map them.
+    const claimedNicks = new Set(Object.values(ratIrcNicks));
+    const activeNicks = new Set([...Object.keys(jumpCalls), ...Object.keys(ratProgress)]);
+    const unmatchedRats = assignedRats.filter((r) => !ratIrcNicks[r]);
+    const unclaimedActiveNicks = [...activeNicks].filter((n) => !claimedNicks.has(n));
+    if (unmatchedRats.length === 1 && unclaimedActiveNicks.length === 1) {
+      ratIrcNicks[unmatchedRats[0]] = unclaimedActiveNicks[0];
     }
 
     return {

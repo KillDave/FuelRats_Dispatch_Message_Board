@@ -94,6 +94,20 @@ export function MessageEditorPage({ onBack }: { onBack: () => void }) {
   });
   const [msgDraft, setMsgDraft] = useState(blankMsg());
 
+  const [previewVals, setPreviewVals] = useState({
+    clientName: 'CMDRExample',
+    caseNumber: '42',
+    ratCmdrNick: '"Rat Alpha" and "Rat Beta"',
+    ratIrcNick: 'RatAlpha and RatBeta',
+  });
+
+  const applyPreview = (t: string) =>
+    t
+      .replace(/\{clientName\}/g, previewVals.clientName)
+      .replace(/\{caseNumber\}/g, previewVals.caseNumber)
+      .replace(/\{ratCmdrNick\}/g, previewVals.ratCmdrNick)
+      .replace(/\{ratIrcNick\}/g, previewVals.ratIrcNick);
+
   // Persist on every change
   const setButtonGroups = useCallback((fn: QuickMessageGroup[] | ((prev: QuickMessageGroup[]) => QuickMessageGroup[])) => {
     setButtonGroupsRaw(prev => {
@@ -816,6 +830,94 @@ export function MessageEditorPage({ onBack }: { onBack: () => void }) {
                   </p>
                 </div>
               )}
+
+              {/* Preview */}
+              <div className="border border-slate-700/60 rounded-lg p-3 space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-medium text-slate-400">Preview</p>
+                  <span className="text-[10px] text-slate-600">edit sample values to test substitution</span>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  {([
+                    ['clientName', '{clientName}'],
+                    ['caseNumber', '{caseNumber}'],
+                    ['ratCmdrNick', '{ratCmdrNick}'],
+                    ['ratIrcNick', '{ratIrcNick}'],
+                  ] as const).map(([key, placeholder]) => (
+                    <div key={key}>
+                      <label className="text-[10px] text-slate-600 mb-0.5 block">{placeholder}</label>
+                      <Input
+                        value={previewVals[key]}
+                        onChange={(e) => setPreviewVals(f => ({ ...f, [key]: e.target.value }))}
+                        className="bg-slate-950 border-slate-700 text-white h-7 text-xs"
+                      />
+                    </div>
+                  ))}
+                </div>
+                <div className="space-y-2">
+                  {msgDraft.editMode === 'simple' ? (() => {
+                    const items: { label: string; text: string }[] = [];
+                    if (msgDraft.message) items.push({ label: 'Message', text: applyPreview(msgDraft.message) });
+                    if (msgDraft.hasVariants) {
+                      msgDraft.variantsText.split('\n').map(s => s.trim()).filter(Boolean).forEach((v, i) =>
+                        items.push({ label: `Variant ${i + 1}`, text: applyPreview(v) })
+                      );
+                    }
+                    if (msgDraft.hasTrMessage && msgDraft.trMessage)
+                      items.push({ label: 'TR message', text: applyPreview(msgDraft.trMessage) });
+                    if (msgDraft.hasTrVariants) {
+                      msgDraft.trVariantsText.split('\n').map(s => s.trim()).filter(Boolean).forEach((v, i) =>
+                        items.push({ label: `TR variant ${i + 1}`, text: applyPreview(v) })
+                      );
+                    }
+                    if (msgDraft.hasPlatformVariants) {
+                      ([['pvPc', 'PC'], ['pvXbox', 'Xbox'], ['pvPlaystation', 'PlayStation'], ['pvLegacy', 'Legacy'], ['pvDefault', 'Default']] as const).forEach(([key, lbl]) => {
+                        if (msgDraft[key]) items.push({ label: lbl, text: applyPreview(msgDraft[key]) });
+                      });
+                    }
+                    return items.length === 0
+                      ? <p className="text-xs text-slate-600 italic">Enter a message to see preview.</p>
+                      : items.map((item, i) => (
+                        <div key={i} className="space-y-0.5">
+                          <p className="text-[10px] text-slate-500">{item.label}</p>
+                          <p className="text-xs text-slate-200 bg-slate-950 rounded px-2.5 py-2 font-mono break-all whitespace-pre-wrap">{item.text}</p>
+                        </div>
+                      ));
+                  })() : (() => {
+                    try {
+                      const parsed = JSON.parse(msgDraft.jsonText) as QuickMessage;
+                      const items: { label: string; text: string }[] = [];
+                      if (parsed.message) items.push({ label: 'Message', text: applyPreview(parsed.message) });
+                      (parsed.variants ?? []).forEach((v, i) => {
+                        const text = typeof v === 'string' ? v : v.message;
+                        const wt = typeof v === 'string' ? '' : ` (w${v.weight})`;
+                        items.push({ label: `Variant ${i + 1}${wt}`, text: applyPreview(text) });
+                      });
+                      if (parsed.trMessage) items.push({ label: 'TR message', text: applyPreview(parsed.trMessage) });
+                      (parsed.trVariants ?? []).forEach((v, i) => {
+                        const text = typeof v === 'string' ? v : v.message;
+                        items.push({ label: `TR variant ${i + 1}`, text: applyPreview(text) });
+                      });
+                      Object.entries(parsed.platformVariants ?? {}).forEach(([k, v]) => {
+                        if (v) items.push({ label: `Platform: ${k}`, text: applyPreview(v) });
+                      });
+                      Object.entries(parsed.trPlatformVariants ?? {}).forEach(([k, v]) => {
+                        if (v) items.push({ label: `TR platform: ${k}`, text: applyPreview(v) });
+                      });
+                      return items.length === 0
+                        ? <p className="text-xs text-slate-600 italic">No messages to preview.</p>
+                        : items.map((item, i) => (
+                          <div key={i} className="space-y-0.5">
+                            <p className="text-[10px] text-slate-500">{item.label}</p>
+                            <p className="text-xs text-slate-200 bg-slate-950 rounded px-2.5 py-2 font-mono break-all whitespace-pre-wrap">{item.text}</p>
+                          </div>
+                        ));
+                    } catch {
+                      return <p className="text-xs text-slate-600 italic">Fix JSON to see preview.</p>;
+                    }
+                  })()}
+                </div>
+              </div>
 
               {msgDraft.jsonError && (
                 <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/30 rounded px-3 py-2">

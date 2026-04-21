@@ -1,12 +1,12 @@
 const TOKEN_KEY = 'fr_dispatch_token';
 const OAUTH_STATE_KEY = 'fr_oauth_state';
 
-const API_BASE = 'https://fuelrats.com';
+
 // ⚠️  Replace this with your registered OAuth client_id from the FuelRats team.
 // Contact admins with your redirect URI to get one.
-const CLIENT_ID = 'YOUR_CLIENT_ID_HERE';
+const CLIENT_ID = '6f9da467-a409-4cf7-a998-48895f79072c';
 const REDIRECT_URI = `${window.location.origin}/callback`;
-const SCOPES = 'openid profile';
+const SCOPES = 'openid profile rescues.read';
 
 export const authService = {
   // ── OAuth2 Implicit Grant ────────────────────────────────────────────────
@@ -24,7 +24,7 @@ export const authService = {
       state,
     });
 
-    window.location.href = `${API_BASE}/oauth2/authorize?${params}`;
+    window.location.href = `https://fuelrats.com/authorize?${params}`;
   },
 
   /**
@@ -32,21 +32,21 @@ export const authService = {
    * Returns the access token on success, or throws on error / state mismatch.
    */
   handleCallback(): string {
-    const hash = new URLSearchParams(window.location.hash.slice(1));
+    const params = new URLSearchParams(window.location.search);
 
-    const error = hash.get('error');
+    const error = params.get('error');
     if (error) {
-      throw new Error(`OAuth error: ${error} — ${hash.get('error_description') ?? ''}`);
+      throw new Error(`OAuth error: ${error} — ${params.get('error_description') ?? ''}`);
     }
 
-    const state = hash.get('state');
+    const state = params.get('state');
     const savedState = sessionStorage.getItem(OAUTH_STATE_KEY);
     sessionStorage.removeItem(OAUTH_STATE_KEY);
     if (state !== savedState) {
       throw new Error('OAuth state mismatch — possible CSRF attack');
     }
 
-    const token = hash.get('access_token');
+    const token = params.get('access_token');
     if (!token) throw new Error('No access_token in callback URL');
 
     this.setToken(token);

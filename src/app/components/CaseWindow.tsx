@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import type { Case, CaseStatus } from './DispatchBoard';
+import { translateText, toDeepLTargetLang, getDeepLApiKey, setDeepLApiKey } from '../services/translationService';
 import { Button } from '@/app/components/ui/button';
 import { Input } from '@/app/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/app/components/ui/popover';
@@ -36,6 +37,7 @@ interface CaseWindowProps {
   onClearUnread: (caseId: string) => void;
   ircConnected: boolean;
   buttonGroups?: QuickMessageGroup[];
+  onSetTranslation: (caseId: string, messageId: string, translation: string) => void;
 }
 
 const statusColors = {
@@ -67,6 +69,7 @@ export function CaseWindow({
   onClearUnread,
   ircConnected,
   buttonGroups = DEFAULT_BUTTON_GROUPS,
+  onSetTranslation,
 }: CaseWindowProps) {
   const [messageInput, setMessageInput] = useState('');
   const [isFlickering, setIsFlickering] = useState(false);
@@ -77,6 +80,9 @@ export function CaseWindow({
   const [activityElapsedTime, setActivityElapsedTime] = useState(0);
   const [combinedPopoverOpen, setCombinedPopoverOpen] = useState(false);
   const [translateEnabled, setTranslateEnabled] = useState(false);
+  const [deeplEnabled, setDeeplEnabled] = useState(false);
+  const [deeplApiKey, setDeeplApiKeyState] = useState(() => getDeepLApiKey());
+  const [showApiKeyInput, setShowApiKeyInput] = useState(false);
   const [rootPopoverOpen, setRootPopoverOpen] = useState<Record<number, boolean>>({});
   const [subPopoverOpen, setSubPopoverOpen] = useState<Record<string, boolean>>({});
   const [openRatMenuId, setOpenRatMenuId] = useState<string | null>(null);
@@ -91,6 +97,22 @@ export function CaseWindow({
   useEffect(() => {
     scrollToBottom();
   }, [caseData.messages]);
+
+  // Auto-translate new incoming messages via DeepL when enabled
+  useEffect(() => {
+    if (!deeplEnabled) return;
+    const messages = caseData.messages;
+    if (messages.length === 0) return;
+    const last = messages[messages.length - 1];
+    // Only translate non-system, non-notice messages that don't already have a translation
+    if (last.isSystem || last.isNotice || last.translation) return;
+    // Skip if the case language is English — no point calling the API
+    const lang = caseData.language?.toLowerCase() ?? '';
+    if (lang.startsWith('en')) return;
+    translateText(last.text).then((result) => {
+      if (result) onSetTranslation(caseData.id, last.id, result);
+    });
+  }, [caseData.messages, deeplEnabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Trigger flicker effect based on case status and messages
   useEffect(() => {
@@ -175,29 +197,44 @@ export function CaseWindow({
     return result;
   };
 
-  const handleSendMessage = () => {
-    if (messageInput.trim()) {
-      let finalMessage = messageInput;
+  const handleSendMessage = async () => {
+    if (!messageInput.trim()) return;
 
-      if (translateEnabled && messageInput.trim().startsWith('!')) {
-        // For ! commands, append -a only if the command is in the whitelist
+    let finalMessage = messageInput;
+    const isCommand = messageInput.trim().startsWith('!');
+
+    if (translateEnabled && isCommand) {
+      // For ! commands, append -a only if the command is in the whitelist
+      const parts = messageInput.trim().split(/\s+/);
+      const command = parts[0].toLowerCase();
+      const args = parts.slice(1).join(' ');
+      if (trCommands.has(command)) {
+        finalMessage = `${command}-a${args ? ' ' + args : ''}`;
+      }
+    } else if (translateEnabled) {
+      // Apply /tr formatting for regular messages
+      const caseNumber = parseInt(caseData.id.split('-')[1], 10);
+      finalMessage = `/tr ${caseNumber} ${messageInput}`;
+    } else if (deeplEnabled && caseData.language && !caseData.language.toLowerCase().startsWith('en')) {
+      // DeepL fallback: mirror /tr behaviour for commands, translate text messages
+      if (isCommand) {
         const parts = messageInput.trim().split(/\s+/);
         const command = parts[0].toLowerCase();
         const args = parts.slice(1).join(' ');
         if (trCommands.has(command)) {
           finalMessage = `${command}-a${args ? ' ' + args : ''}`;
         }
-      } else if (translateEnabled) {
-        // Apply /tr formatting for regular messages
-        const caseNumber = parseInt(caseData.id.split('-')[1], 10);
-        finalMessage = `/tr ${caseNumber} ${messageInput}`;
+      } else {
+        const targetLang = toDeepLTargetLang(caseData.language);
+        const translated = await translateText(messageInput, targetLang);
+        if (translated) finalMessage = translated;
       }
-
-      onAddMessage(caseData.id, finalMessage);
-      setMessageInput('');
-      setTabIndex(-1);
-      setTabBase('');
     }
+
+    onAddMessage(caseData.id, finalMessage);
+    setMessageInput('');
+    setTabIndex(-1);
+    setTabBase('');
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -377,25 +414,38 @@ export function CaseWindow({
     '!modules', '!open', '!frcr', '!wing', '!beacon', '!fr', '!gofr', '!go',
   ]);
 
-  const sendQuickMessage = (message: string, keepOpen?: boolean) => {
+  const sendQuickMessage = async (message: string, keepOpen?: boolean) => {
     let finalMessage = message;
+    const isCommand = message.startsWith('!');
 
     // If /tr is enabled and command supports -a, add -a after the command
-    if (translateEnabled && message.startsWith('!')) {
+    if (translateEnabled && isCommand) {
       const parts = message.split(' ');
-      const command = parts[0]; // e.g., "!team"
+      const command = parts[0];
       const args = parts.slice(1).join(' ');
-
       if (trCommands.has(command)) {
         finalMessage = `${command}-a${args ? ' ' + args : ''}`;
       }
-    } else if (translateEnabled && !message.startsWith('!')) {
+    } else if (translateEnabled && !isCommand) {
       // Regular messages get /tr prefix
       finalMessage = `/tr ${caseNumber} ${message}`;
+    } else if (deeplEnabled && caseData.language && !caseData.language.toLowerCase().startsWith('en')) {
+      // DeepL fallback: mirror /tr behaviour for commands, translate text messages
+      if (isCommand) {
+        const parts = message.split(' ');
+        const command = parts[0];
+        const args = parts.slice(1).join(' ');
+        if (trCommands.has(command)) {
+          finalMessage = `${command}-a${args ? ' ' + args : ''}`;
+        }
+      } else {
+        const targetLang = toDeepLTargetLang(caseData.language);
+        const translated = await translateText(message, targetLang);
+        if (translated) finalMessage = translated;
+      }
     }
 
     onAddMessage(caseData.id, finalMessage);
-    // Only refocus the input if we're not keeping the popover open
     if (!keepOpen) {
       setTimeout(() => {
         messageInputRef.current?.focus();
@@ -685,10 +735,7 @@ export function CaseWindow({
                                     className="w-full text-xs bg-slate-900 rounded px-2 py-1 text-slate-300 hover:bg-slate-800 transition-colors flex items-center justify-between group cursor-pointer"
                                   >
                                     <span>
-                                      {rat}
-                                      {caseData.ratIrcNicks?.[rat] && caseData.ratIrcNicks[rat].toLowerCase() !== rat.toLowerCase() && (
-                                        <span className="text-slate-500 ml-1">({caseData.ratIrcNicks[rat]})</span>
-                                      )}
+                                      {caseData.ratIrcNicks?.[rat] ?? rat}
                                     </span>
                                     <ChevronDown className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" />
                                   </button>
@@ -741,17 +788,64 @@ export function CaseWindow({
                       <div>
                         <h3 className="text-xs font-semibold text-slate-400 mb-2 flex items-center gap-1">
                           <Languages className="w-3 h-3" />
-                          Language
+                          Language{caseData.language ? ` - ${new Intl.DisplayNames(['en'], { type: 'language' }).of(caseData.language)}` : ''}
                         </h3>
-                        <div>
+                        <div className="space-y-1">
                           <Button
                             variant="outline"
                             size="sm"
                             className={`w-full text-xs h-8 bg-slate-900 border-slate-600 text-white hover:bg-slate-700 ${translateEnabled ? 'bg-orange-600/20 border-orange-500' : ''}`}
-                            onClick={() => setTranslateEnabled(!translateEnabled)}
+                            onClick={() => { setTranslateEnabled(!translateEnabled); setDeeplEnabled(false); }}
                           >
                             /tr {translateEnabled ? '(ON)' : '(OFF)'}
                           </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className={`w-full text-xs h-8 bg-slate-900 border-slate-600 text-white hover:bg-slate-700 ${deeplEnabled ? 'bg-blue-600/20 border-blue-500' : ''}`}
+                            onClick={() => {
+                              if (!getDeepLApiKey()) {
+                                setShowApiKeyInput(true);
+                              } else {
+                                setDeeplEnabled(!deeplEnabled);
+                                setTranslateEnabled(false);
+                              }
+                            }}
+                          >
+                            DeepL {deeplEnabled ? '(ON)' : '(OFF)'}
+                          </Button>
+                          {showApiKeyInput && (
+                            <div className="flex gap-1 mt-1">
+                              <Input
+                                className="h-7 text-xs bg-slate-900 border-slate-600 text-white"
+                                placeholder="DeepL API key"
+                                value={deeplApiKey}
+                                onChange={(e) => setDeeplApiKeyState(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter' && deeplApiKey.trim()) {
+                                    setDeepLApiKey(deeplApiKey.trim());
+                                    setShowApiKeyInput(false);
+                                    setDeeplEnabled(true);
+                                    setTranslateEnabled(false);
+                                  }
+                                }}
+                              />
+                              <Button
+                                size="sm"
+                                className="h-7 px-2 text-xs bg-blue-600 hover:bg-blue-700 text-white shrink-0"
+                                onClick={() => {
+                                  if (deeplApiKey.trim()) {
+                                    setDeepLApiKey(deeplApiKey.trim());
+                                    setShowApiKeyInput(false);
+                                    setDeeplEnabled(true);
+                                    setTranslateEnabled(false);
+                                  }
+                                }}
+                              >
+                                Save
+                              </Button>
+                            </div>
+                          )}
                         </div>
                       </div>
 
