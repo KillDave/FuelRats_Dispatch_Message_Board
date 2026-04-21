@@ -2,9 +2,7 @@ const TOKEN_KEY = 'fr_dispatch_token';
 const OAUTH_STATE_KEY = 'fr_oauth_state';
 
 
-// ⚠️  Replace this with your registered OAuth client_id from the FuelRats team.
-// Contact admins with your redirect URI to get one.
-const CLIENT_ID = '6f9da467-a409-4cf7-a998-48895f79072c';
+const CLIENT_ID = import.meta.env.VITE_CLIENT_ID as string;
 const REDIRECT_URI = `${window.location.origin}/callback`;
 const SCOPES = 'openid profile rescues.read';
 
