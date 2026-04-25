@@ -109,29 +109,6 @@ interface ApiResponse {
 // FuelRats uses array format: [eventType, statusCode, data, meta]
 type WSMessage = [string, number, any, any];
 
-interface WSEventData {
-  jsonapi?: {
-    version: string;
-    meta: {
-      apiVersion: string;
-    };
-  };
-  meta?: {
-    apiVersion?: string;
-    rateLimitTotal?: number;
-    rateLimitRemaining?: number;
-    rateLimitReset?: string;
-    event?: string;
-    resource?: string;
-    timestamp?: string;
-  };
-  data?: any;
-  included?: Array<ApiRat | any>;
-  errors?: Array<{
-    status: string;
-    detail: string;
-  }>;
-}
 
 export class FuelRatsApiService {
   private wsUrl = 'wss://api.fuelrats.com';
@@ -163,13 +140,6 @@ export class FuelRatsApiService {
   public rateLimitRemaining: number = 0;
   public rateLimitTotal: number = 0;
   public rateLimitReset: Date | null = null;
-
-  /**
-   * Set the API key for authentication
-   */
-  setApiKey(key: string): void {
-    this.apiKey = key;
-  }
 
   /**
    * Connect to the FuelRats API (REST first, then WebSocket)
@@ -562,8 +532,15 @@ export class FuelRatsApiService {
         };
         
         const cases = this.transformApiData(apiResponse);
+        // Sync activeCases from the list, preserving inactive cases the list may omit
+        cases.forEach(c => this.activeCases.set(c.id, c));
+        for (const [id, c] of this.activeCases) {
+          if (!cases.find(r => r.id === id) && c.status !== 'inactive') {
+            this.activeCases.delete(id);
+          }
+        }
         if (this.onUpdateCallback) {
-          this.onUpdateCallback(cases);
+          this.onUpdateCallback(Array.from(this.activeCases.values()));
         }
       }
       return;
@@ -604,7 +581,7 @@ export class FuelRatsApiService {
       const cases = this.transformApiData(apiResponse);
       if (cases.length > 0) {
         const caseData = cases[0];
-        if (caseData.status === 'inactive' || (data.data.attributes?.status === 'closed')) {
+        if (data.data.attributes?.status === 'closed') {
           const existing = Array.from(this.activeCases.values()).find(c => c.apiId === id);
           if (existing) this.activeCases.delete(existing.id);
         } else {

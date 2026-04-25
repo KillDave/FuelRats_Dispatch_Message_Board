@@ -58,6 +58,7 @@ FuelRatAPI_Claude_Chat.txt
 
 # Build artifacts
 *.zip
+bridge-dist/
 
 # Debug/troubleshooting docs
 ERROR_SUMMARY.txt

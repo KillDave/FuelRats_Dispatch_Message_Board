@@ -5,7 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite --open",
-    "build": "vite build"
+    "build": "vite build",
+    "bridge": "python scripts/python/node.py",
+    "bridge:build": "pyinstaller --onefile --name bridge --distpath bridge-dist --workpath bridge-dist/build --specpath bridge-dist scripts/python/node.py",
+    "build:all": "npm run build && npm run bridge:build"
   },
   "dependencies": {
     "@emotion/react": "11.14.0",

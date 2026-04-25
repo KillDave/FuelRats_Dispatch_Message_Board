@@ -26,16 +26,54 @@ export function IRCConnectionPanel({
 }: IRCConnectionPanelProps) {
   const [wsUrl, setWsUrl] = useState(() => localStorage.getItem(IRC_URL_KEY) || 'ws://localhost:8080');
   const [isExpanded, setIsExpanded] = useState(false);
+  const [launchHint, setLaunchHint] = useState(false);
+  const [autoLaunch, setAutoLaunch] = useState(() => localStorage.getItem('fr_auto_launch') === 'true');
 
   useEffect(() => {
     if (forceExpanded) setIsExpanded(true);
   }, [forceExpanded]);
+
+  useEffect(() => {
+    if (status === 'connected') setLaunchHint(false);
+  }, [status]);
+
+  // Auto-launch and connect on page load if the option is enabled
+  useEffect(() => {
+    if (!autoLaunch || !wsUrl.trim()) return;
+    let timer: number;
+    // Probe the WebSocket first — if bridge is already running, just connect
+    const probe = new WebSocket(wsUrl.trim());
+    probe.onopen = () => {
+      probe.close();
+      onConnect(wsUrl.trim());
+    };
+    probe.onerror = () => {
+      // Bridge not running — launch it then wait for it to start
+      window.location.href = 'fr-dispatch://launch';
+      timer = window.setTimeout(() => onConnect(wsUrl.trim()), 3000);
+    };
+    return () => {
+      clearTimeout(timer);
+      if (probe.readyState === WebSocket.CONNECTING) probe.close();
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleConnect = () => {
     if (wsUrl.trim()) {
       localStorage.setItem(IRC_URL_KEY, wsUrl.trim());
       onConnect(wsUrl.trim());
     }
+  };
+
+  const handleLaunch = () => {
+    window.location.href = 'fr-dispatch://launch';
+    setLaunchHint(false);
+    setTimeout(() => setLaunchHint(true), 2500);
+  };
+
+  const handleAutoLaunchToggle = (checked: boolean) => {
+    setAutoLaunch(checked);
+    localStorage.setItem('fr_auto_launch', String(checked));
   };
 
   const dotColor =
@@ -56,7 +94,7 @@ export function IRCConnectionPanel({
   const configContent = (
     <div className="space-y-3">
       <div>
-        <label className="block text-xs text-slate-400 mb-1">AdiIRC WebSocket URL</label>
+        <label className="block text-xs text-slate-400 mb-1">Bridge WebSocket URL</label>
         <input
           type="text"
           value={wsUrl}
@@ -87,21 +125,45 @@ export function IRCConnectionPanel({
             Disconnect
           </button>
         ) : (
-          <button
-            onClick={handleConnect}
-            disabled={status === 'connecting' || !wsUrl.trim()}
-            className="flex-1 bg-green-600 hover:bg-green-700 disabled:bg-slate-700 disabled:cursor-not-allowed text-white text-sm py-1 rounded"
-          >
-            {status === 'connecting' ? 'Connecting...' : 'Connect'}
-          </button>
+          <>
+            <button
+              onClick={handleLaunch}
+              title="Launch bridge.exe via registered protocol handler"
+              className="bg-blue-600 hover:bg-blue-700 text-white text-sm py-1 px-3 rounded"
+            >
+              Launch Bridge
+            </button>
+            <button
+              onClick={handleConnect}
+              disabled={status === 'connecting' || !wsUrl.trim()}
+              className="flex-1 bg-green-600 hover:bg-green-700 disabled:bg-slate-700 disabled:cursor-not-allowed text-white text-sm py-1 rounded"
+            >
+              {status === 'connecting' ? 'Connecting...' : 'Connect'}
+            </button>
+          </>
         )}
       </div>
+      <label className="flex items-center gap-2 cursor-pointer select-none">
+        <input
+          type="checkbox"
+          checked={autoLaunch}
+          onChange={(e) => handleAutoLaunchToggle(e.target.checked)}
+          className="accent-blue-500"
+        />
+        <span className="text-xs text-slate-400">Auto-launch bridge on page load</span>
+      </label>
+      {launchHint && (
+        <div className="text-xs text-yellow-400 bg-yellow-900/20 border border-yellow-700/50 rounded px-2 py-1">
+          Nothing happened? Run <code className="text-orange-400">bridge.exe --register</code> once first, then try Launch Bridge again.
+        </div>
+      )}
       <div className="text-xs text-slate-400 bg-slate-900/50 rounded p-2">
         <div className="font-semibold text-slate-300 mb-1">Setup Instructions:</div>
         <ol className="list-decimal list-inside space-y-1">
-          <li>Create WebSocket server in AdiIRC script</li>
-          <li>Send JSON messages: <code className="text-orange-400">{'{ type, channel, nick, text }'}</code></li>
-          <li>Enter WebSocket URL above and connect</li>
+          <li>Download <code className="text-orange-400">bridge.exe</code></li>
+          <li>Run once: <code className="text-orange-400">bridge.exe --register</code></li>
+          <li>Click <span className="text-blue-400">Launch Bridge</span> above — browser will ask permission</li>
+          <li>Click <span className="text-green-400">Connect</span> once the bridge is running</li>
         </ol>
       </div>
     </div>
