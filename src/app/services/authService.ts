@@ -30,7 +30,9 @@ export const authService = {
    * Returns the access token on success, or throws on error / state mismatch.
    */
   handleCallback(): string {
-    const params = new URLSearchParams(window.location.search);
+    // Implicit grant delivers the token in the URL fragment (#), not the query
+    // string, so it is never sent to servers or stored in browser history.
+    const params = new URLSearchParams(window.location.hash.substring(1));
 
     const error = params.get('error');
     if (error) {
@@ -48,6 +50,11 @@ export const authService = {
     if (!token) throw new Error('No access_token in callback URL');
 
     this.setToken(token);
+
+    // Strip the fragment (and token) from the browser history entry so the
+    // token cannot leak via Referer headers or be re-read from history.
+    window.history.replaceState({}, '', window.location.pathname);
+
     return token;
   },
 

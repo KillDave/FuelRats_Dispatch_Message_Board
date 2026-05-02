@@ -265,7 +265,7 @@ async def main():
     try:
         async with websockets.serve(
             handle_client,
-            "0.0.0.0",
+            "127.0.0.1",
             WS_PORT,
             ping_interval=20,
             ping_timeout=10

@@ -37,18 +37,21 @@ export function IRCConnectionPanel({
     if (status === 'connected') setLaunchHint(false);
   }, [status]);
 
-  // Auto-launch and connect on page load if the option is enabled
+  // Auto-launch and connect on page load if the option is enabled.
+  // Guarded by a sessionStorage flag so that re-mounts caused by bridge failures
+  // (which open this panel) do not re-trigger the launch.
   useEffect(() => {
     if (!autoLaunch || !wsUrl.trim()) return;
+    if (sessionStorage.getItem('fr_bridge_launched')) return;
+    sessionStorage.setItem('fr_bridge_launched', 'true');
+
     let timer: number;
-    // Probe the WebSocket first — if bridge is already running, just connect
     const probe = new WebSocket(wsUrl.trim());
     probe.onopen = () => {
       probe.close();
       onConnect(wsUrl.trim());
     };
     probe.onerror = () => {
-      // Bridge not running — launch it then wait for it to start
       window.location.href = 'fr-dispatch://launch';
       timer = window.setTimeout(() => onConnect(wsUrl.trim()), 3000);
     };

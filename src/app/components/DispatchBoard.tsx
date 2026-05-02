@@ -91,7 +91,8 @@ export interface Case {
   oxygenStatus?: string;
   landmark?: { name: string; distance: number };
   scoopable?: boolean;
-  nearestStation?: { name: string; distanceToArrival: number; type: string; systemName?: string; systemDistance?: number };
+  nearestLStation?: { name: string; distanceToArrival: number; type: string; systemName?: string; systemDistance?: number };
+  nearestSmStation?: { name: string; distanceToArrival: number; type: string; systemName?: string; systemDistance?: number };
   ratProgress?: Record<string, {
     fr?: '+' | '-';
     wr?: '+' | '-';
@@ -103,6 +104,13 @@ export interface Case {
 }
 
 const initialCases: Case[] = [];
+
+const isLPadStation = (type: string) => !['Outpost', 'Planetary Outpost'].includes(type);
+const isFleetCarrier = (type: string) => type === 'Fleet Carrier';
+const isColonizationStation = (type: string) =>
+  type.toLowerCase().includes('colonisation') || type.toLowerCase().includes('construction');
+const canSeeColonization = (platform: string) =>
+  platform.includes('Odyssey') || platform.includes('Horizons');
 
 const RESCUE_DEFAULT: QuickMessageGroup = { label: 'RESCUE', messages: rescueMessages };
 const DEFAULT_BUTTON_GROUPS: QuickMessageGroup[] = [RESCUE_DEFAULT, dispatchMessages];
@@ -154,25 +162,11 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
 
   // Effect to handle API WebSocket connection when useApiData is enabled
   useEffect(() => {
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    console.log('⚙️  DispatchBoard: API Connection Effect');
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    console.log('   useApiData:', useApiData);
-    
-    if (!useApiData) {
-      console.log('ℹ️  API data disabled - skipping connection');
-      return;
-    }
+    if (!useApiData) return;
 
-    console.log('📡 Initializing FuelRats API connection...');
     setIsLoadingApi(true);
 
-    // Connect to WebSocket and receive real-time updates
     fuelRatsApi.connect((fetchedCases) => {
-      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-      console.log('📥 DispatchBoard: Received cases from API');
-      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-      console.log('   Fetched cases:', fetchedCases.length);
       setIsLoadingApi(false);
       
       // Merge with existing cases to preserve local state like messages added by dispatch
@@ -219,7 +213,8 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
               ...fetchedCase,
               messages: [...existingCase.messages, ...newMessages],
               scoopable: existingCase.scoopable,
-              nearestStation: existingCase.nearestStation,
+              nearestLStation: existingCase.nearestLStation,
+              nearestSmStation: existingCase.nearestSmStation,
               ratProgress: existingCase.ratProgress,
               jumpCalls: existingCase.jumpCalls,
               // Merge ratIrcNicks: live IRC-derived mappings take precedence over API-derived
@@ -280,8 +275,10 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
     });
   }, [cases]);
 
-  // Fetch nearest station from EDSM; re-fetches if a case's system name changes.
-  // Falls back to a 50ly sphere search if the rescue system has no stations.
+  // Fetch nearest L-pad and S/M-only stations from EDSM separately.
+  // S/M station is only stored if it's closer than the nearest L station.
+  // Colonisation stations are hidden for Legacy/console clients.
+  // Falls back to a 50ly sphere search when the rescue system has no stations.
   useEffect(() => {
     cases.forEach((c) => {
       const system = c.system;
@@ -289,60 +286,91 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
       if (nearestStationFetchedRef.current.get(c.id) === system) return;
       nearestStationFetchedRef.current.set(c.id, system);
 
+      type StationData = { name: string; distanceToArrival: number; type: string; systemName?: string; systemDistance?: number };
+      const showColonization = canSeeColonization(c.platform);
+
       fetch(`https://www.edsm.net/api-system-v1/stations?systemName=${encodeURIComponent(system)}`)
         .then((r) => r.json())
         .then(async (data) => {
-          const stations: { name: string; distanceToArrival: number; type: string }[] =
-            data?.stations ?? [];
-
-          if (stations.length > 0) {
-            const nearest = stations.reduce((a, b) =>
-              a.distanceToArrival <= b.distanceToArrival ? a : b
-            );
-            setCases((prev) =>
-              prev.map((pc) =>
-                pc.id === c.id && pc.system === system
-                  ? { ...pc, nearestStation: { name: nearest.name, distanceToArrival: nearest.distanceToArrival, type: nearest.type } }
-                  : pc
-              )
-            );
-            return;
-          }
-
-          // No stations in system — search nearby systems within 50ly
-          const sphereRes = await fetch(
-            `https://www.edsm.net/api-v1/sphere-systems?systemName=${encodeURIComponent(system)}&radius=50&showInformation=1`
+          const rawStations: { name: string; distanceToArrival: number; type: string }[] = data?.stations ?? [];
+          const stations = rawStations.filter(s =>
+            !isFleetCarrier(s.type) && (showColonization || !isColonizationStation(s.type))
           );
-          const nearbySystems: { name: string; distance: number; information?: { population?: number } }[] =
-            await sphereRes.json();
 
-          // Filter to populated systems (likely to have stations), sort by distance
-          const candidates = nearbySystems
-            .filter((s) => (s.information?.population ?? 0) > 0)
-            .sort((a, b) => a.distance - b.distance);
+          const lStations = stations.filter(s => isLPadStation(s.type));
+          const smOnlyStations = stations.filter(s => !isLPadStation(s.type));
 
-          for (const candidate of candidates) {
-            const stnRes = await fetch(
-              `https://www.edsm.net/api-system-v1/stations?systemName=${encodeURIComponent(candidate.name)}`
+          let nearestL: StationData | null = lStations.length > 0
+            ? lStations.reduce((a, b) => a.distanceToArrival <= b.distanceToArrival ? a : b)
+            : null;
+          let nearestSm: StationData | null = smOnlyStations.length > 0
+            ? smOnlyStations.reduce((a, b) => a.distanceToArrival <= b.distanceToArrival ? a : b)
+            : null;
+
+          const needLSphere = !nearestL;
+          // Only search sphere for SM if there are no stations in system at all
+          const needSmSphere = stations.length === 0;
+
+          if (needLSphere || needSmSphere) {
+            const sphereRes = await fetch(
+              `https://www.edsm.net/api-v1/sphere-systems?systemName=${encodeURIComponent(system)}&radius=50&showInformation=1`
             );
-            const stnData = await stnRes.json();
-            const nearbyStations: { name: string; distanceToArrival: number; type: string }[] =
-              stnData?.stations ?? [];
+            const nearbySystems: { name: string; distance: number; information?: { population?: number } }[] =
+              await sphereRes.json();
 
-            if (nearbyStations.length > 0) {
-              const nearest = nearbyStations.reduce((a, b) =>
-                a.distanceToArrival <= b.distanceToArrival ? a : b
+            const candidates = nearbySystems
+              .filter((s) => (s.information?.population ?? 0) > 0)
+              .sort((a, b) => a.distance - b.distance);
+
+            for (const candidate of candidates) {
+              if ((!needLSphere || nearestL) && (!needSmSphere || nearestSm)) break;
+
+              const stnRes = await fetch(
+                `https://www.edsm.net/api-system-v1/stations?systemName=${encodeURIComponent(candidate.name)}`
               );
-              setCases((prev) =>
-                prev.map((pc) =>
-                  pc.id === c.id && pc.system === system
-                    ? { ...pc, nearestStation: { name: nearest.name, distanceToArrival: nearest.distanceToArrival, type: nearest.type, systemName: candidate.name, systemDistance: candidate.distance } }
-                    : pc
-                )
+              const stnData = await stnRes.json();
+              const nearbyRaw: { name: string; distanceToArrival: number; type: string }[] = stnData?.stations ?? [];
+              const nearbyStations = nearbyRaw.filter(s =>
+                !isFleetCarrier(s.type) && (showColonization || !isColonizationStation(s.type))
               );
-              return;
+
+              if (needLSphere && !nearestL) {
+                const nearbyL = nearbyStations.filter(s => isLPadStation(s.type));
+                if (nearbyL.length > 0) {
+                  const best = nearbyL.reduce((a, b) => a.distanceToArrival <= b.distanceToArrival ? a : b);
+                  nearestL = { ...best, systemName: candidate.name, systemDistance: candidate.distance };
+                }
+              }
+
+              if (needSmSphere && !nearestSm) {
+                const nearbySm = nearbyStations.filter(s => !isLPadStation(s.type));
+                if (nearbySm.length > 0) {
+                  const best = nearbySm.reduce((a, b) => a.distanceToArrival <= b.distanceToArrival ? a : b);
+                  nearestSm = { ...best, systemName: candidate.name, systemDistance: candidate.distance };
+                }
+              }
             }
           }
+
+          // Only show SM if it's genuinely closer than L — L stations serve all ship sizes
+          const smIsCloser = !!nearestSm && (
+            !nearestL ||
+            (!nearestSm.systemName && !nearestL.systemName && nearestSm.distanceToArrival < nearestL.distanceToArrival) ||
+            (!nearestSm.systemName && !!nearestL.systemName) ||
+            (!!nearestSm.systemName && !!nearestL.systemName && nearestSm.systemDistance! < nearestL.systemDistance!)
+          );
+
+          setCases((prev) =>
+            prev.map((pc) =>
+              pc.id === c.id && pc.system === system
+                ? {
+                    ...pc,
+                    nearestLStation: nearestL ?? undefined,
+                    nearestSmStation: smIsCloser ? nearestSm! : undefined,
+                  }
+                : pc
+            )
+          );
         })
         .catch(() => {});
     });
@@ -427,10 +455,7 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
   }, []);
 
   const handleIRCMessage = (ircMsg: IRCMessage) => {
-    if (ircMsg.type === 'system') {
-      console.log('[IRC System]', ircMsg.text);
-      return;
-    }
+    if (ircMsg.type === 'system') return;
 
     if ((ircMsg.type !== 'message' && ircMsg.type !== 'notice') || !ircMsg.nick || !ircMsg.text) return;
 
@@ -534,10 +559,7 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
             (Date.now() - msg.timestamp.getTime()) < 5000
         );
 
-        if (isDuplicate) {
-          console.log('🚫 Duplicate IRC/API message detected, skipping:', displayText);
-          return c;
-        }
+        if (isDuplicate) return c;
 
         const newMessage: Message = {
           id: `irc-${Date.now()}-${Math.random()}`,

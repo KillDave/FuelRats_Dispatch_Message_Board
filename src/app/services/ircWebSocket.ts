@@ -27,85 +27,44 @@ export class IRCWebSocketService {
    * Connect to AdiIRC WebSocket server
    */
   connect(url: string): void {
-    console.log('[IRC WS] ========================================');
-    console.log('[IRC WS] connect() called with URL:', url);
-    console.log('[IRC WS] URL type:', typeof url);
-    console.log('[IRC WS] URL length:', url.length);
-    console.log('[IRC WS] Browser WebSocket support:', typeof WebSocket !== 'undefined');
-    
-    if (this.ws?.readyState === WebSocket.OPEN) {
-      console.log('[IRC WS] Already connected to IRC WebSocket');
-      return;
-    }
-
-    if (this.ws) {
-      console.log('[IRC WS] Previous ws exists, readyState:', this.ws.readyState);
-    }
+    if (this.ws?.readyState === WebSocket.OPEN) return;
 
     try {
-      console.log('[IRC WS] About to create WebSocket...');
+      console.log('[IRC WS] Connecting to bridge...');
       this.updateStatus('connecting');
-      console.log('[IRC WS] Status updated to connecting');
-      console.log('[IRC WS] Calling new WebSocket() constructor...');
       this.ws = new WebSocket(url);
-      console.log('[IRC WS] ✅ WebSocket object created successfully!');
-      console.log('[IRC WS] WebSocket readyState:', this.ws.readyState);
-      console.log('[IRC WS] WebSocket url property:', this.ws.url);
 
       this.ws.onopen = () => {
-        console.log('[IRC WS] ✅ Connected successfully!');
-        console.log('[IRC WS] ReadyState:', this.ws?.readyState);
+        console.log('[IRC WS] Connected');
         this.reconnectAttempts = 0;
         this.updateStatus('connected');
       };
 
       this.ws.onmessage = (event) => {
-        console.log('[IRC WS] 📨 Received message:', event.data);
         try {
           const data = JSON.parse(event.data);
           this.handleMessage(data);
         } catch (error) {
-          console.error('[IRC WS] Error parsing IRC message:', error);
+          console.error('[IRC WS] Error parsing message:', error);
         }
       };
 
-      this.ws.onerror = (error) => {
-        console.error('[IRC WS] ❌ onerror event fired!');
-        console.error('[IRC WS] Error object:', error);
-        console.error('[IRC WS] Error type:', typeof error);
-        console.error('[IRC WS] Error constructor:', error.constructor.name);
-        console.error('[IRC WS] ReadyState:', this.ws?.readyState);
+      this.ws.onerror = () => {
+        console.error('[IRC WS] Connection error');
         this.updateStatus('error');
-        if (this.onError) {
-          this.onError('WebSocket connection error');
-        }
-        if (this.onConnectionFailed) {
-          this.onConnectionFailed();
-        }
+        if (this.onError) this.onError('WebSocket connection error');
+        if (this.onConnectionFailed) this.onConnectionFailed();
       };
 
       this.ws.onclose = (event) => {
-        console.log('[IRC WS] 🔌 onclose event fired!');
-        console.log('[IRC WS] Close code:', event.code);
-        console.log('[IRC WS] Close reason:', event.reason);
-        console.log('[IRC WS] Was clean:', event.wasClean);
-        console.log('[IRC WS] ReadyState:', this.ws?.readyState);
+        console.log(`[IRC WS] Closed — code ${event.code}`);
         this.updateStatus('disconnected');
         this.attemptReconnect(url);
       };
-      
-      console.log('[IRC WS] All event handlers attached successfully');
-      console.log('[IRC WS] ========================================');
     } catch (error) {
-      console.error('[IRC WS] ❌ EXCEPTION in connect()!');
-      console.error('[IRC WS] Exception type:', typeof error);
-      console.error('[IRC WS] Exception:', error);
-      console.error('[IRC WS] Exception message:', (error as Error).message);
-      console.error('[IRC WS] Exception stack:', (error as Error).stack);
+      console.error('[IRC WS] Failed to connect:', (error as Error).message);
       this.updateStatus('error');
-      if (this.onError) {
-        this.onError('Failed to connect: ' + (error as Error).message);
-      }
+      if (this.onError) this.onError('Failed to connect: ' + (error as Error).message);
     }
   }
 
@@ -229,17 +188,11 @@ export class IRCWebSocketService {
    * Attempt to reconnect after disconnect
    */
   private attemptReconnect(url: string): void {
-    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.log('Max reconnect attempts reached');
-      return;
-    }
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) return;
 
     this.reconnectAttempts++;
-    console.log(`Attempting to reconnect (${this.reconnectAttempts}/${this.maxReconnectAttempts})...`);
-
-    this.reconnectTimer = window.setTimeout(() => {
-      this.connect(url);
-    }, this.reconnectDelay);
+    console.log(`[IRC WS] Reconnecting (${this.reconnectAttempts}/${this.maxReconnectAttempts})...`);
+    this.reconnectTimer = window.setTimeout(() => this.connect(url), this.reconnectDelay);
   }
 
   /**

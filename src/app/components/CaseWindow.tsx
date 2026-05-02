@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import type { Case, CaseStatus } from './DispatchBoard';
 import { translateText, toDeepLTargetLang, getDeepLApiKey, setDeepLApiKey } from '../services/translationService';
 import { Button } from '@/app/components/ui/button';
@@ -86,6 +86,20 @@ export function CaseWindow({
   const [rootPopoverOpen, setRootPopoverOpen] = useState<Record<number, boolean>>({});
   const [subPopoverOpen, setSubPopoverOpen] = useState<Record<string, boolean>>({});
   const [openRatMenuId, setOpenRatMenuId] = useState<string | null>(null);
+  const [stationHover, setStationHover] = useState(false);
+  const [stationPopupOffset, setStationPopupOffset] = useState(0);
+  const stationHideTimer = useRef<number | null>(null);
+  const stationPopupRef = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    if (stationHover && stationPopupRef.current) {
+      const rect = stationPopupRef.current.getBoundingClientRect();
+      const overflow = rect.right - window.innerWidth + 8;
+      setStationPopupOffset(overflow > 0 ? -overflow : 0);
+    } else {
+      setStationPopupOffset(0);
+    }
+  }, [stationHover]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatAreaRef = useRef<HTMLDivElement>(null);
   const messageInputRef = useRef<HTMLInputElement>(null);
@@ -530,12 +544,62 @@ export function CaseWindow({
                   Scoopable
                 </div>
               )}
-              {caseData.nearestStation && (
-                <div className="text-xs text-white border border-slate-500/60 bg-slate-500/10 rounded px-1.5 py-0.5">
-                  {caseData.nearestStation.systemName
-                    ? `${caseData.nearestStation.name} in ${caseData.nearestStation.systemName} (${caseData.nearestStation.systemDistance?.toFixed(1)}ly)`
-                    : `${caseData.nearestStation.name} (${Math.round(caseData.nearestStation.distanceToArrival).toLocaleString()}ls)`
-                  }
+              {(caseData.nearestLStation || caseData.nearestSmStation) && (
+                <div
+                  className="relative"
+                  onMouseEnter={() => {
+                    if (stationHideTimer.current) clearTimeout(stationHideTimer.current);
+                    setStationHover(true);
+                  }}
+                  onMouseLeave={() => {
+                    stationHideTimer.current = window.setTimeout(() => setStationHover(false), 150);
+                  }}
+                >
+                  <div className="text-xs text-white border border-slate-500/60 bg-slate-500/10 rounded px-1.5 py-0.5 cursor-default select-none">
+                    Station
+                  </div>
+                  {stationHover && (
+                    <div ref={stationPopupRef} style={{ left: stationPopupOffset }} className="absolute bottom-full mb-1 z-50 bg-slate-900 border border-slate-600 rounded shadow-xl p-1 min-w-max">
+                      {caseData.nearestSmStation && (
+                        <button
+                          className="flex items-center gap-2 w-full text-left px-2 py-1 rounded hover:bg-slate-700/50 text-xs"
+                          onClick={() => {
+                            const sm = caseData.nearestSmStation!;
+                            const text = sm.systemName
+                              ? `${sm.name} in ${sm.systemName} (${sm.systemDistance?.toFixed(1)}ly)`
+                              : `${sm.name} (${Math.round(sm.distanceToArrival).toLocaleString()}ls)`;
+                            navigator.clipboard.writeText(text);
+                          }}
+                        >
+                          <span className="text-slate-400 font-mono w-7 flex-shrink-0">S/M</span>
+                          <span className="text-slate-300">
+                            {caseData.nearestSmStation.systemName
+                              ? `${caseData.nearestSmStation.name} in ${caseData.nearestSmStation.systemName} (${caseData.nearestSmStation.systemDistance?.toFixed(1)}ly)`
+                              : `${caseData.nearestSmStation.name} (${Math.round(caseData.nearestSmStation.distanceToArrival).toLocaleString()}ls)`}
+                          </span>
+                        </button>
+                      )}
+                      {caseData.nearestLStation && (
+                        <button
+                          className="flex items-center gap-2 w-full text-left px-2 py-1 rounded hover:bg-slate-700/50 text-xs"
+                          onClick={() => {
+                            const l = caseData.nearestLStation!;
+                            const text = l.systemName
+                              ? `${l.name} in ${l.systemName} (${l.systemDistance?.toFixed(1)}ly)`
+                              : `${l.name} (${Math.round(l.distanceToArrival).toLocaleString()}ls)`;
+                            navigator.clipboard.writeText(text);
+                          }}
+                        >
+                          <span className="text-slate-400 font-mono w-7 flex-shrink-0">L</span>
+                          <span className="text-slate-300">
+                            {caseData.nearestLStation.systemName
+                              ? `${caseData.nearestLStation.name} in ${caseData.nearestLStation.systemName} (${caseData.nearestLStation.systemDistance?.toFixed(1)}ly)`
+                              : `${caseData.nearestLStation.name} (${Math.round(caseData.nearestLStation.distanceToArrival).toLocaleString()}ls)`}
+                          </span>
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
