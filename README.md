@@ -88,6 +88,12 @@ Click **Login** and you'll be redirected to [fuelrats.com](https://fuelrats.com)
 
 ## Changelog
 
+### v1.1.1
+- Station badge now shows a hover popup with S/M and Large pad stations — click either to copy to clipboard
+- Station popup repositions automatically if it would clip the screen edge
+- Removed verbose debug logging from API service, IRC bridge, and components
+- Added site favicon
+
 ### v1.1.0
 - DeepL auto-translation for incoming messages
 - `bridge.exe --version` flag
