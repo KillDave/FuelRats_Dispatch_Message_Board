@@ -803,7 +803,7 @@ export function CaseWindow({
           )}
 
           {/* Pinned jump calls + SC time */}
-          {((caseData.jumpCalls && Object.keys(caseData.jumpCalls).length > 0) || caseData.scDistanceLs !== undefined) && (() => {
+          {((caseData.jumpCalls && Object.keys(caseData.jumpCalls).length > 0) || caseData.scDistance !== undefined) && (() => {
             const hasSco = caseData.platform.toLowerCase().includes('horizons') || caseData.platform.toLowerCase().includes('odyssey');
             const activeShip = SCO_SHIPS.find(s => s.key === scoShip)!;
             const scTotalSecs = caseData.scDistance !== undefined
