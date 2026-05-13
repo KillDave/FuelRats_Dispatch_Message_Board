@@ -2,11 +2,12 @@ import { useState, useEffect, useRef } from 'react';
 import { CaseWindow } from './CaseWindow';
 import { MessageEditorPage } from './MessageEditorPage';
 import { Button } from '@/app/components/ui/button';
-import { Eye, EyeOff, Sidebar, User, MapPin, AlertTriangle, Clock, LogOut } from 'lucide-react';
+import { Eye, EyeOff, Sidebar, User, MapPin, AlertTriangle, Clock, LogOut, Plus } from 'lucide-react';
 import { fuelRatsApi } from '../services/fuelRatsApi';
 import { ircWebSocket, IRCMessage, IRCConnectionStatus } from '../services/ircWebSocket';
 import { IRCConnectionPanel } from './IRCConnectionPanel';
 import fuelRatsLogo from './image/TransparentBackgroundRatto.png';
+import disconnectIcon from './image/Disconnect_Icon.png';
 import { dispatchMessages, rescueMessages } from '../config/quickMessages';
 import type { QuickMessageGroup } from '../config/quickMessages';
 import { BUTTON_GROUPS_KEY, DISPATCH_CONFIG_KEY, RESCUE_CONFIG_KEY } from '../config/messageTreeHelpers';
@@ -91,6 +92,8 @@ export interface Case {
   oxygenStatus?: string;
   landmark?: { name: string; distance: number };
   scoopable?: boolean;
+  nearestScoopableStar?: { name: string; distance: number };
+  scDistance?: { ls: number; timestamp: Date };
   nearestLStation?: { name: string; distanceToArrival: number; type: string; systemName?: string; systemDistance?: number };
   nearestSmStation?: { name: string; distanceToArrival: number; type: string; systemName?: string; systemDistance?: number };
   ratProgress?: Record<string, {
@@ -100,6 +103,7 @@ export interface Case {
     fuel?: boolean;
   }>;
   jumpCalls?: Record<string, { jumps: number; text: string; timestamp: Date }>;
+  clientInChannel: boolean;
   createdAt: Date;
 }
 
@@ -157,6 +161,18 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
   const [ircStatus, setIrcStatus] = useState<IRCConnectionStatus>('disconnected');
   const [ircError, setIrcError] = useState<string | undefined>();
   const [ircChannel, setIrcChannel] = useState('#fuelrats'); // Default IRC channel
+
+  const [showAddCase, setShowAddCase] = useState(false);
+  const [addCaseForm, setAddCaseForm] = useState({
+    ircName: '',
+    cmdrName: '',
+    system: '',
+    platform: 'pc' as 'pc' | 'xb' | 'ps',
+    gameMode: '' as '' | 'l' | 'h' | 'o',
+    language: 'en',
+    codeRed: false,
+    forceMecha: false,
+  });
   const [isConnectionPanelOpen, setIsConnectionPanelOpen] = useState(false);
   const ircFailCountRef = useRef(0);
 
@@ -213,6 +229,8 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
               ...fetchedCase,
               messages: [...existingCase.messages, ...newMessages],
               scoopable: existingCase.scoopable,
+              nearestScoopableStar: existingCase.nearestScoopableStar,
+              scDistance: existingCase.scDistance,
               nearestLStation: existingCase.nearestLStation,
               nearestSmStation: existingCase.nearestSmStation,
               ratProgress: existingCase.ratProgress,
@@ -260,16 +278,51 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
       scoopableFetchedRef.current.set(c.id, system);
       fetch(`https://www.edsm.net/api-v1/system?systemName=${encodeURIComponent(system)}&showPrimaryStar=1`)
         .then((r) => r.json())
-        .then((data) => {
-          if (typeof data?.primaryStar?.isScoopable === 'boolean') {
-            setCases((prev) =>
-              prev.map((pc) =>
-                pc.id === c.id && pc.system === system
-                  ? { ...pc, scoopable: data.primaryStar.isScoopable }
-                  : pc
-              )
-            );
+        .then(async (data) => {
+          if (typeof data?.primaryStar?.isScoopable !== 'boolean') return;
+          const isScoopable: boolean = data.primaryStar.isScoopable;
+
+          let nearestScoopableStar: { name: string; distance: number } | undefined;
+          if (!isScoopable) {
+            try {
+              // sphere-systems doesn't support showPrimaryStar, so do a two-step lookup:
+              // 1) get nearby system names+distances, 2) bulk-query their primary stars
+              const sphereRes = await fetch(
+                `https://www.edsm.net/api-v1/sphere-systems?systemName=${encodeURIComponent(system)}&radius=50`
+              );
+              const nearbySystems: { name: string; distance: number }[] = await sphereRes.json();
+              const candidates = nearbySystems
+                .filter((s) => s.name !== system)
+                .sort((a, b) => a.distance - b.distance)
+                .slice(0, 15);
+
+              if (candidates.length > 0) {
+                const params = new URLSearchParams({ showPrimaryStar: '1' });
+                candidates.forEach((s) => params.append('systemName[]', s.name));
+                const bulkRes = await fetch(`https://www.edsm.net/api-v1/systems?${params}`);
+                const bulkData: { name: string; primaryStar?: { isScoopable?: boolean } }[] = await bulkRes.json();
+
+                const closest = bulkData
+                  .filter((s) => s.primaryStar?.isScoopable === true)
+                  .map((s) => {
+                    const c = candidates.find((c) => c.name === s.name);
+                    return c ? { name: s.name, distance: c.distance } : null;
+                  })
+                  .filter(Boolean)
+                  .sort((a, b) => a!.distance - b!.distance)[0];
+
+                if (closest) nearestScoopableStar = closest as { name: string; distance: number };
+              }
+            } catch {}
           }
+
+          setCases((prev) =>
+            prev.map((pc) =>
+              pc.id === c.id && pc.system === system
+                ? { ...pc, scoopable: isScoopable, nearestScoopableStar }
+                : pc
+            )
+          );
         })
         .catch(() => {});
     });
@@ -583,6 +636,13 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
 
         let updatedRatIrcNicks = c.ratIrcNicks;
 
+        // Update client channel presence from live MechaSqueak messages
+        let updatedClientInChannel = c.clientInChannel;
+        if (ircMsg.nick?.toLowerCase().includes('mechasqueak')) {
+          if (displayText === 'Client left the rescue channel') updatedClientInChannel = false;
+          else if (displayText === 'Client rejoined the rescue channel') updatedClientInChannel = true;
+        }
+
         // PRIMARY: learn nick → CMDR from MechaSqueak's response to !gofr/!go
         // Response format (any language): ... "CMDR Name 1" "CMDR Name 2"
         // Zip quoted names from the response with nicks from the command by index
@@ -607,11 +667,24 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
         // Detect jump calls: "#N Xj [optional text]"
         let updatedJumpCalls = c.jumpCalls ?? {};
         const caseNum = parseInt(c.id.split('-')[1], 10);
-        const jumpMatch = displayText.match(new RegExp(`#${caseNum}\\s+(\\d+)j\\b`, 'i'));
+
+        // Detect SC distance reports: "#N ... X.Xly/ls/au" (e.g. "#6 bc+ .41ly")
+        let updatedScDistance = c.scDistance;
+        if (new RegExp(`#${caseNum}\\b`).test(displayText)) {
+          const distMatch = displayText.match(/([\d]*\.?[\d]+)\s*(ls|ly|au)\b/i);
+          if (distMatch) {
+            const val = parseFloat(distMatch[1]);
+            const unit = distMatch[2].toLowerCase();
+            const ls = unit === 'ly' ? val * 31_557_600 : unit === 'au' ? val * 499 : val;
+            updatedScDistance = { ls, timestamp: ircMsg.timestamp };
+          }
+        }
+        const jumpPattern = new RegExp(`(?:#${caseNum}\\s+(\\d+)j|(\\d+)j\\s+#${caseNum})\\b`, 'i');
+        const jumpMatch = displayText.match(jumpPattern);
         if (jumpMatch && ircMsg.nick) {
           updatedJumpCalls = {
             ...updatedJumpCalls,
-            [ircMsg.nick]: { jumps: parseInt(jumpMatch[1], 10), text: displayText, timestamp: ircMsg.timestamp },
+            [ircMsg.nick]: { jumps: parseInt(jumpMatch[1] ?? jumpMatch[2], 10), text: displayText, timestamp: ircMsg.timestamp },
           };
         }
 
@@ -626,8 +699,8 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
             [/\bfr\s*-/i,           'fr',   '-'],
             [/\b(?:wr|tm)\s*\+/i,   'wr',   '+'],
             [/\b(?:wr|tm)\s*-/i,    'wr',   '-'],
-            [/\bbc\s*\+/i,          'bc',   '+'],
-            [/\bbc\s*-/i,           'bc',   '-'],
+            [/\b(?:bc|inst)\s*\+/i, 'bc',   '+'],
+            [/\b(?:bc|inst)\s*-/i,  'bc',   '-'],
             [/\bfuel\s*\+/i,        'fuel', true],
           ];
           // fuel is a case-level first-delivery flag — only the first rat to report it is marked
@@ -649,8 +722,10 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
           ...c,
           ircNick: updatedIrcNick,
           ratIrcNicks: updatedRatIrcNicks,
+          scDistance: updatedScDistance,
           jumpCalls: updatedJumpCalls,
           ratProgress: updatedRatProgress,
+          clientInChannel: updatedClientInChannel,
           messages: [...c.messages, newMessage],
         };
       })
@@ -667,10 +742,18 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
   };
 
   // Sort cases oldest-first (by createdAt ascending)
+  const shortPlatform = (platform: string): string => {
+    const platformMap: Record<string, string> = { 'PC': 'PC', 'Xbox': 'XB', 'PlayStation': 'PS' };
+    const expansionMap: Record<string, string> = { 'Odyssey': 'ODY', 'Horizons': 'HOR', 'Legacy': 'LEG' };
+    const [plat, exp] = platform.split(' - ');
+    const short = platformMap[plat] ?? plat;
+    return exp ? `${short}-${expansionMap[exp] ?? exp}` : short;
+  };
+
   const sortedCases = [...cases].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
   const visibleCases = sortedCases.filter((c) => toggledCaseIds.has(c.id));
 
-  const addMessage = (caseId: string, text: string, channel?: string) => {
+  const addMessage = (caseId: string, text: string, channel?: string, original?: string) => {
     if (!text.trim()) return;
     const targetChannel = channel || ircChannel;
     // Commands like /tr are executed by AdiIRC directly, not wrapped in PRIVMSG
@@ -698,6 +781,7 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
             text,
             timestamp: new Date(),
             isIRC: true,
+            ...(original ? { translation: original } : {}),
           };
           return { ...c, messages: [...c.messages, newMessage] };
         })
@@ -819,18 +903,26 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
                 {cases.filter((c) => c.status === 'code-red').length}
               </p>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center rounded border border-slate-700 overflow-hidden">
               <button
                 onClick={() => setView('editor')}
-                className="flex items-center gap-1.5 px-2 py-1 text-xs text-slate-400 hover:text-orange-400 hover:bg-orange-500/10 border border-slate-700 hover:border-orange-500/40 rounded transition-colors"
+                className="px-3 py-1.5 text-xs text-slate-400 hover:text-orange-400 hover:bg-orange-500/10 border-r border-slate-700 transition-colors"
                 title="Edit quick messages"
               >
                 Messages
               </button>
+              <button
+                onClick={() => setShowAddCase(true)}
+                className="flex items-center gap-1 px-3 py-1.5 text-xs text-slate-400 hover:text-green-400 hover:bg-green-500/10 border-r border-slate-700 transition-colors"
+                title="Add a new case"
+              >
+                <Plus className="w-3 h-3" />
+                Add Case
+              </button>
               {onLogout && (
                 <button
                   onClick={onLogout}
-                  className="flex items-center gap-1.5 px-2 py-1 text-xs text-slate-400 hover:text-red-400 hover:bg-red-500/10 border border-slate-700 hover:border-red-500/40 rounded transition-colors"
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition-colors"
                   title="Sign out"
                 >
                   <LogOut className="w-3 h-3" />
@@ -884,10 +976,18 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
                   <button
                     key={caseData.id}
                     onClick={() => toggleCase(caseData.id)}
-                    className={`w-full px-4 py-3 border-b border-slate-800 hover:bg-slate-800 transition-colors text-left ${
+                    className={`relative w-full px-4 py-3 border-b border-slate-800 hover:bg-slate-800 transition-colors text-left ${
                       isVisible ? 'bg-slate-850' : 'bg-slate-900 opacity-60'
                     } ${hasUnread && isVisible ? 'animate-pulse bg-orange-500/10 border-l-4 border-l-orange-500' : ''} ${hasUnread && !isVisible ? 'animate-pulse bg-red-500/20 border-l-4 border-l-red-500 opacity-100' : ''}`}
                   >
+                    {!caseData.clientInChannel && (
+                      <img
+                        src={disconnectIcon}
+                        alt=""
+                        className="absolute inset-0 h-full w-auto object-cover pointer-events-none"
+                        style={{ opacity: 0.4 }}
+                      />
+                    )}
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-1">
@@ -915,8 +1015,6 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
                             />
                           </span>
                           <span className="truncate">{caseData.system}</span>
-                          <span>•</span>
-                          <span>{caseData.platform}</span>
                         </div>
                         <div className={`flex items-center gap-2 text-xs mb-1 ${isVisible ? 'text-slate-400' : 'text-slate-600'}`}>
                           <Clock className="w-3 h-3 flex-shrink-0" />
@@ -930,17 +1028,22 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
                           </div>
                         )}
                       </div>
-                      <div className="flex-shrink-0 flex items-center gap-2">
-                        <span className="text-2xl font-bold text-orange-400">
-                          {caseData.id.split('-')[1]}
+                      <div className="flex-shrink-0 flex flex-col items-end gap-0.5">
+                        <div className="flex items-center gap-2">
+                          <span className="text-2xl font-bold text-orange-400">
+                            {caseData.id.split('-')[1]}
+                          </span>
+                          {isVisible ? (
+                            <Eye className="w-4 h-4 text-orange-500" />
+                          ) : hasUnread ? (
+                            <EyeOff className="w-4 h-4 text-red-500 animate-pulse" />
+                          ) : (
+                            <EyeOff className="w-4 h-4 text-slate-600" />
+                          )}
+                        </div>
+                        <span className={`text-xs ${isVisible ? 'text-slate-400' : 'text-slate-600'}`}>
+                          {shortPlatform(caseData.platform)}
                         </span>
-                        {isVisible ? (
-                          <Eye className="w-4 h-4 text-orange-500" />
-                        ) : hasUnread ? (
-                          <EyeOff className="w-4 h-4 text-red-500 animate-pulse" />
-                        ) : (
-                          <EyeOff className="w-4 h-4 text-slate-600" />
-                        )}
                       </div>
                     </div>
                   </button>
@@ -1024,6 +1127,7 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
                 hasUnread={unreadCases.has(caseData.id)}
                 onClearUnread={clearUnread}
                 ircConnected={ircStatus === 'connected'}
+                clientInChannel={caseData.clientInChannel}
                 buttonGroups={buttonGroups}
                 onSetTranslation={setMessageTranslation}
               />
@@ -1042,6 +1146,267 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
             setView('board');
           }}
         />
+      )}
+
+      {showAddCase && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+          onClick={() => setShowAddCase(false)}
+        >
+          <div
+            className="bg-slate-900 border border-slate-700 rounded-lg p-6 w-full max-w-md shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-bold text-orange-500">Add Case</h2>
+              <button
+                onClick={() => setAddCaseForm({ ircName: '', cmdrName: '', system: '', platform: 'pc', gameMode: '', language: 'en', codeRed: false, forceMecha: false })}
+                className="text-xs text-slate-500 hover:text-slate-300 border border-slate-700 hover:border-slate-500 px-2 py-1 rounded transition-colors"
+              >
+                Clear
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">IRC NAME</label>
+                <input
+                  type="text"
+                  value={addCaseForm.ircName}
+                  onChange={(e) => setAddCaseForm((f) => ({ ...f, ircName: e.target.value }))}
+                  className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-orange-500"
+                  placeholder="Client IRC nickname"
+                  autoFocus
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">CMDR NAME <span className="text-slate-600">(optional — if different from IRC name)</span></label>
+                <input
+                  type="text"
+                  value={addCaseForm.cmdrName}
+                  onChange={(e) => setAddCaseForm((f) => ({ ...f, cmdrName: e.target.value }))}
+                  className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-orange-500"
+                  placeholder="Commander name"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">SYSTEM</label>
+                <input
+                  type="text"
+                  value={addCaseForm.system}
+                  onChange={(e) => setAddCaseForm((f) => ({ ...f, system: e.target.value }))}
+                  className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-orange-500"
+                  placeholder="Star system name"
+                />
+              </div>
+
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <label className="block text-xs text-slate-400 mb-1">PLATFORM</label>
+                  <select
+                    value={addCaseForm.platform}
+                    onChange={(e) => setAddCaseForm((f) => ({ ...f, platform: e.target.value as 'pc' | 'xb' | 'ps', gameMode: '' }))}
+                    className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-orange-500"
+                  >
+                    <option value="pc">PC</option>
+                    <option value="xb">Xbox</option>
+                    <option value="ps">PS4</option>
+                  </select>
+                </div>
+                {addCaseForm.platform === 'pc' && (
+                  <div className="flex-1">
+                    <label className="block text-xs text-slate-400 mb-1">GAME MODE</label>
+                    <select
+                      value={addCaseForm.gameMode}
+                      onChange={(e) => setAddCaseForm((f) => ({ ...f, gameMode: e.target.value as '' | 'l' | 'h' | 'o' }))}
+                      className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-orange-500"
+                    >
+                      <option value="">— select —</option>
+                      <option value="l">Legacy</option>
+                      <option value="h">Horizons</option>
+                      <option value="o">Odyssey</option>
+                    </select>
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">LANGUAGE</label>
+                <select
+                  value={addCaseForm.language}
+                  onChange={(e) => setAddCaseForm((f) => ({ ...f, language: e.target.value }))}
+                  className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-orange-500"
+                >
+                  <option value="en">English - en</option>
+                  <option value="zh">Mandarin Chinese - zh</option>
+                  <option value="hi">Hindi - hi</option>
+                  <option value="es">Spanish - es</option>
+                  <option value="fr">French - fr</option>
+                  <option value="de">German - de</option>
+                  <option value="ru">Russian - ru</option>
+                  <option value="ar">Arabic - ar</option>
+                  <option value="it">Italian - it</option>
+                  <option value="ko">Korean - ko</option>
+                  <option value="pa">Punjabi - pa</option>
+                  <option value="bn">Bengali - bn</option>
+                  <option value="pt">Portuguese - pt</option>
+                  <option value="id">Indonesian - id</option>
+                  <option value="ur">Urdu - ur</option>
+                  <option value="fa">Persian (Farsi) - fa</option>
+                  <option value="vi">Vietnamese - vi</option>
+                  <option value="pl">Polish - pl</option>
+                  <option value="sm">Samoan - sm</option>
+                  <option value="th">Thai - th</option>
+                  <option value="uk">Ukrainian - uk</option>
+                  <option value="tr">Turkish - tr</option>
+                  <option value="mi">Maori - mi</option>
+                  <option value="no">Norwegian - no</option>
+                  <option value="nl">Dutch - nl</option>
+                  <option value="el">Greek - el</option>
+                  <option value="ro">Romanian - ro</option>
+                  <option value="sw">Swahili - sw</option>
+                  <option value="hu">Hungarian - hu</option>
+                  <option value="he">Hebrew - he</option>
+                  <option value="sv">Swedish - sv</option>
+                  <option value="cs">Czech - cs</option>
+                  <option value="fi">Finnish - fi</option>
+                  <option value="am">Amharic - am</option>
+                  <option value="tl">Tagalog - tl</option>
+                  <option value="my">Burmese - my</option>
+                  <option value="ta">Tamil - ta</option>
+                  <option value="kn">Kannada - kn</option>
+                  <option value="ps">Pashto - ps</option>
+                  <option value="yo">Yoruba - yo</option>
+                  <option value="ms">Malay - ms</option>
+                  <option value="ht">Haitian Creole - ht</option>
+                  <option value="ne">Nepali - ne</option>
+                  <option value="si">Sinhala - si</option>
+                  <option value="ca">Catalan - ca</option>
+                  <option value="mg">Malagasy - mg</option>
+                  <option value="lv">Latvian - lv</option>
+                  <option value="lt">Lithuanian - lt</option>
+                  <option value="et">Estonian - et</option>
+                  <option value="so">Somali - so</option>
+                  <option value="ti">Tigrinya - ti</option>
+                  <option value="br">Breton - br</option>
+                  <option value="fj">Fijian - fj</option>
+                  <option value="mt">Maltese - mt</option>
+                  <option value="co">Corsican - co</option>
+                  <option value="lb">Luxembourgish - lb</option>
+                  <option value="oc">Occitan - oc</option>
+                  <option value="cy">Welsh - cy</option>
+                  <option value="sq">Albanian - sq</option>
+                  <option value="mk">Macedonian - mk</option>
+                  <option value="is">Icelandic - is</option>
+                  <option value="sl">Slovenian - sl</option>
+                  <option value="gl">Galician - gl</option>
+                  <option value="eu">Basque - eu</option>
+                  <option value="az">Azerbaijani - az</option>
+                  <option value="uz">Uzbek - uz</option>
+                  <option value="kk">Kazakh - kk</option>
+                  <option value="mn">Mongolian - mn</option>
+                  <option value="bo">Tibetan - bo</option>
+                  <option value="km">Khmer - km</option>
+                  <option value="lo">Lao - lo</option>
+                  <option value="te">Telugu - te</option>
+                  <option value="mr">Marathi - mr</option>
+                  <option value="ny">Chichewa - ny</option>
+                  <option value="eo">Esperanto - eo</option>
+                  <option value="ku">Kurdish - ku</option>
+                  <option value="tg">Tajik - tg</option>
+                  <option value="xh">Xhosa - xh</option>
+                  <option value="yi">Yiddish - yi</option>
+                  <option value="zu">Zulu - zu</option>
+                  <option value="su">Sundanese - su</option>
+                  <option value="tt">Tatar - tt</option>
+                  <option value="qu">Quechua - qu</option>
+                  <option value="ug">Uighur - ug</option>
+                  <option value="wo">Wolof - wo</option>
+                  <option value="tn">Tswana - tn</option>
+                </select>
+              </div>
+
+              <div className="flex flex-col gap-2 pt-1">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={addCaseForm.codeRed}
+                    onChange={(e) => setAddCaseForm((f) => ({ ...f, codeRed: e.target.checked }))}
+                    className="accent-red-500 w-4 h-4"
+                  />
+                  <span className="text-sm text-slate-300">CODE RED</span>
+                </label>
+
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={addCaseForm.forceMecha}
+                    onChange={(e) => setAddCaseForm((f) => ({ ...f, forceMecha: e.target.checked }))}
+                    className="accent-orange-500 w-4 h-4 mt-0.5"
+                  />
+                  <span className="text-sm text-slate-300">
+                    FORCE MECHA
+                    <span className="block text-xs text-slate-500">Force mecha to add the case even if the client isn't in the channel</span>
+                  </span>
+                </label>
+              </div>
+            </div>
+
+            {(() => {
+              const parts = ['!addcase'];
+              if (addCaseForm.forceMecha) parts.push('-f');
+              if (addCaseForm.ircName) parts.push(addCaseForm.ircName);
+              parts.push(`--${addCaseForm.platform}`);
+              if (addCaseForm.platform === 'pc' && addCaseForm.gameMode) parts.push(`--mode ${addCaseForm.gameMode}`);
+              if (addCaseForm.system) parts.push(`--sys ${addCaseForm.system}`);
+              if (addCaseForm.cmdrName) parts.push(`--cmdr ${addCaseForm.cmdrName}`);
+              if (addCaseForm.codeRed) parts.push('--cr');
+              if (addCaseForm.language !== 'en') parts.push(`--lang ${addCaseForm.language}`);
+              return (
+                <div className="mt-4 bg-slate-950 border border-slate-700 rounded px-3 py-2">
+                  <p className="text-xs text-slate-500 mb-1">Command preview</p>
+                  <p className="font-mono text-xs text-orange-300 break-all">{parts.join(' ')}</p>
+                </div>
+              );
+            })()}
+
+            <div className="flex gap-2 mt-3">
+              <button
+                onClick={() => {
+                  const parts = ['!addcase'];
+                  if (addCaseForm.forceMecha) parts.push('-f');
+                  parts.push(addCaseForm.ircName);
+                  parts.push(`--${addCaseForm.platform}`);
+                  if (addCaseForm.platform === 'pc' && addCaseForm.gameMode) parts.push(`--mode ${addCaseForm.gameMode}`);
+                  if (addCaseForm.system) parts.push(`--sys ${addCaseForm.system}`);
+                  if (addCaseForm.cmdrName) parts.push(`--cmdr ${addCaseForm.cmdrName}`);
+                  if (addCaseForm.codeRed) parts.push('--cr');
+                  if (addCaseForm.language !== 'en') parts.push(`--lang ${addCaseForm.language}`);
+                  const command = parts.join(' ');
+                  if (ircStatus === 'connected') {
+                    ircWebSocket.sendMessage(ircChannel, command);
+                  } else {
+                    navigator.clipboard.writeText(command);
+                  }
+                  setShowAddCase(false);
+                  setAddCaseForm({ ircName: '', cmdrName: '', system: '', platform: 'pc', gameMode: '', language: 'en', codeRed: false, forceMecha: false });
+                }}
+                disabled={!addCaseForm.ircName.trim()}
+                className="flex-1 px-4 py-2 text-sm font-medium bg-orange-600 hover:bg-orange-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded transition-colors"
+              >
+                {ircStatus === 'connected' ? 'Send to IRC' : 'Copy Command'}
+              </button>
+              <button
+                onClick={() => setShowAddCase(false)}
+                className="px-4 py-2 text-sm text-slate-400 hover:text-white border border-slate-700 hover:border-slate-500 rounded transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </>
   );

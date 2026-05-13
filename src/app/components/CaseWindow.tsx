@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useLayoutEffect } from 'react';
+import disconnectIcon from './image/Disconnect_Icon.png';
 import type { Case, CaseStatus } from './DispatchBoard';
 import { translateText, toDeepLTargetLang, getDeepLApiKey, setDeepLApiKey } from '../services/translationService';
 import { Button } from '@/app/components/ui/button';
@@ -28,7 +29,7 @@ interface CaseWindowProps {
   caseData: Case;
   totalCases: number;
   caseIndex: number;
-  onAddMessage: (caseId: string, text: string, channel?: string) => void;
+  onAddMessage: (caseId: string, text: string, channel?: string, original?: string) => void;
   onStatusChange: (caseId: string, status: CaseStatus) => void;
   onClose: (caseId: string) => void;
   onAssignRat: (caseId: string, ratName: string) => void;
@@ -36,6 +37,7 @@ interface CaseWindowProps {
   hasUnread?: boolean;
   onClearUnread: (caseId: string) => void;
   ircConnected: boolean;
+  clientInChannel: boolean;
   buttonGroups?: QuickMessageGroup[];
   onSetTranslation: (caseId: string, messageId: string, translation: string) => void;
 }
@@ -56,6 +58,47 @@ const statusBgColors = {
   closed: 'bg-slate-500/10',
 };
 
+// --- Supercruise time calculation (ported from SwiftSqueak/NumberFormatter.swift) ---
+const SC_ACCEL_RATE = 0.244343173;
+const SC_ACCEL_MIDPOINT = 24.3043969;
+const SC_VERTICAL_OFFSET = -90.9763924;
+
+function scSpeed(t: number, maxSpeed: number): number {
+  return maxSpeed / (1 + Math.exp(-SC_ACCEL_RATE * (t - SC_ACCEL_MIDPOINT))) + SC_VERTICAL_OFFSET;
+}
+
+function scDistanceTravelled(time: number, maxSpeed: number, steps = 200): number {
+  const dt = time / steps;
+  let dist = 0;
+  for (let i = 0; i < steps; i++) {
+    dist += 0.5 * (Math.max(0, scSpeed(i * dt, maxSpeed)) + Math.max(0, scSpeed((i + 1) * dt, maxSpeed))) * dt;
+  }
+  return dist;
+}
+
+function distanceToSeconds(ls: number, scoMaxSpeed?: number): number {
+  if (scoMaxSpeed !== undefined) {
+    let low = 0, high = 400_000;
+    while (high - low > 0.5) {
+      const mid = (low + high) / 2;
+      if (scDistanceTravelled(mid, scoMaxSpeed) < ls) low = mid; else high = mid;
+    }
+    return (low + high) / 2;
+  }
+  if (ls < 100_000) return 8.9034 * Math.pow(ls, 0.3292);
+  if (ls < 1_907_087) return -8e-23 * ls ** 4 + 4e-16 * ls ** 3 - 8e-10 * ls ** 2 + 0.0014 * ls + 264.79;
+  return (ls - 5_265_389.609) / 2001 + 3412;
+}
+
+
+const SCO_SHIPS = [
+  { key: 'cobra', label: 'Cobra Mk V', speed: 7000 },
+  { key: 'mandalay', label: 'Mandalay', speed: 4200 },
+  { key: 'caspian', label: 'Caspian', speed: 2900 },
+] as const;
+type ScoShipKey = typeof SCO_SHIPS[number]['key'];
+// ---------------------------------------------------------------------------------
+
 export function CaseWindow({
   caseData,
   totalCases,
@@ -68,6 +111,7 @@ export function CaseWindow({
   hasUnread = false,
   onClearUnread,
   ircConnected,
+  clientInChannel,
   buttonGroups = DEFAULT_BUTTON_GROUPS,
   onSetTranslation,
 }: CaseWindowProps) {
@@ -82,6 +126,7 @@ export function CaseWindow({
   const [translateEnabled, setTranslateEnabled] = useState(false);
   const [deeplEnabled, setDeeplEnabled] = useState(false);
   const [deeplApiKey, setDeeplApiKeyState] = useState(() => getDeepLApiKey());
+  const [deeplUsage, setDeeplUsage] = useState<{ count: number; limit: number } | null>(null);
   const [showApiKeyInput, setShowApiKeyInput] = useState(false);
   const [rootPopoverOpen, setRootPopoverOpen] = useState<Record<number, boolean>>({});
   const [subPopoverOpen, setSubPopoverOpen] = useState<Record<string, boolean>>({});
@@ -90,6 +135,15 @@ export function CaseWindow({
   const [stationPopupOffset, setStationPopupOffset] = useState(0);
   const stationHideTimer = useRef<number | null>(null);
   const stationPopupRef = useRef<HTMLDivElement>(null);
+  const [scoopableHover, setScoopableHover] = useState(false);
+  const [scoopablePopupOffset, setScoopablePopupOffset] = useState(0);
+  const scoopableHideTimer = useRef<number | null>(null);
+  const scoopablePopupRef = useRef<HTMLDivElement>(null);
+  const [scoShip, setScoShip] = useState<ScoShipKey>('cobra');
+  const [shipHover, setShipHover] = useState(false);
+  const [shipPopupOffset, setShipPopupOffset] = useState(0);
+  const shipHideTimer = useRef<number | null>(null);
+  const shipPopupRef = useRef<HTMLDivElement>(null);
 
   useLayoutEffect(() => {
     if (stationHover && stationPopupRef.current) {
@@ -100,6 +154,26 @@ export function CaseWindow({
       setStationPopupOffset(0);
     }
   }, [stationHover]);
+
+  useLayoutEffect(() => {
+    if (scoopableHover && scoopablePopupRef.current) {
+      const rect = scoopablePopupRef.current.getBoundingClientRect();
+      const overflow = rect.right - window.innerWidth + 8;
+      setScoopablePopupOffset(overflow > 0 ? -overflow : 0);
+    } else {
+      setScoopablePopupOffset(0);
+    }
+  }, [scoopableHover]);
+
+  useLayoutEffect(() => {
+    if (shipHover && shipPopupRef.current) {
+      const rect = shipPopupRef.current.getBoundingClientRect();
+      const overflow = rect.right - window.innerWidth + 8;
+      setShipPopupOffset(overflow > 0 ? -overflow : 0);
+    } else {
+      setShipPopupOffset(0);
+    }
+  }, [shipHover]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatAreaRef = useRef<HTMLDivElement>(null);
   const messageInputRef = useRef<HTMLInputElement>(null);
@@ -112,14 +186,37 @@ export function CaseWindow({
     scrollToBottom();
   }, [caseData.messages]);
 
+  // Fetch DeepL usage when enabled
+  useEffect(() => {
+    if (!deeplEnabled) return;
+    const apiKey = getDeepLApiKey();
+    if (!apiKey) return;
+    const proxyBase = localStorage.getItem('fr_deepl_proxy_url') || 'http://localhost:8081';
+    const url = `${proxyBase}/${apiKey.endsWith(':fx') ? 'deepl-proxy' : 'deepl-proxy-pro'}/v2/usage`;
+    fetch(url, { headers: { Authorization: `DeepL-Auth-Key ${apiKey}` } })
+      .then((r) => r.json())
+      .then((d) => setDeeplUsage({ count: d.character_count, limit: d.character_limit }))
+      .catch(() => {});
+  }, [deeplEnabled]);
+
   // Auto-translate new incoming messages via DeepL when enabled
   useEffect(() => {
     if (!deeplEnabled) return;
     const messages = caseData.messages;
     if (messages.length === 0) return;
     const last = messages[messages.length - 1];
-    // Only translate non-system, non-notice messages that don't already have a translation
+    // Only translate non-system, non-notice, non-bot messages that don't already have a translation
     if (last.isSystem || last.isNotice || last.translation) return;
+    if (last.sender.toLowerCase().includes('[bot]')) return;
+    // Skip messages from assigned rats
+    const senderLower = last.sender.toLowerCase();
+    const isRat = caseData.assignedRats.some((rat) => {
+      const nick = caseData.ratIrcNicks?.[rat] ?? rat;
+      return nick.toLowerCase() === senderLower || rat.toLowerCase() === senderLower;
+    });
+    if (isRat) return;
+    // Skip messages containing a case number reference (dispatcher/rat coordination)
+    if (/\b#\d{1,2}\b/.test(last.text)) return;
     // Skip if the case language is English — no point calling the API
     const lang = caseData.language?.toLowerCase() ?? '';
     if (lang.startsWith('en')) return;
@@ -245,7 +342,8 @@ export function CaseWindow({
       }
     }
 
-    onAddMessage(caseData.id, finalMessage);
+    const original = finalMessage !== messageInput ? messageInput : undefined;
+    onAddMessage(caseData.id, finalMessage, undefined, original);
     setMessageInput('');
     setTabIndex(-1);
     setTabBase('');
@@ -350,13 +448,14 @@ export function CaseWindow({
   const getRatIrcNick = (cmdrName: string): string =>
     caseData.ratIrcNicks[cmdrName] ?? (cmdrName.includes(' ') ? `"${cmdrName}"` : cmdrName);
 
-  // Short display label for platform (e.g. "PC - Odyssey" → "PC", "Xbox - Odyssey" → "XB")
+  // Short display label for platform (e.g. "PC - Odyssey" → "ODY", "Xbox - Odyssey" → "XB")
   const getPlatformShorthand = (): string => {
     const p = caseData.platform.toLowerCase();
-    if (p.includes('legacy')) return 'Leg';
+    if (p.includes('legacy')) return 'LEG';
     if (p.includes('xbox')) return 'XB';
     if (p.includes('playstation')) return 'PS';
-    if (p.includes('horizons')) return 'PC-H';
+    if (p.includes('horizons')) return 'HOR';
+    if (p.includes('odyssey')) return 'ODY';
     if (p.includes('pc')) return 'PC';
     return caseData.platform;
   };
@@ -503,14 +602,22 @@ export function CaseWindow({
 
   return (
     <div
-      className={`flex-shrink-0 bg-slate-900/70 backdrop-blur-md border-r-2 last:border-r-0 ${statusColors[caseData.status]} h-full flex flex-col ${caseData.status === 'code-red' && isFlickering ? 'code-red-flash' : 'transition-colors duration-[180ms]'}`}
+      className={`flex-shrink-0 bg-slate-900/70 backdrop-blur-md border-r-2 last:border-r-0 ${statusColors[caseData.status]} h-full flex flex-col ${caseData.status === 'code-red' && isFlickering ? 'code-red-flash' : 'transition-colors duration-[180ms]'} ${stationHover || scoopableHover || shipHover ? 'z-10' : ''} relative`}
       style={{
         width: `${widthPercent}%`,
         backgroundColor: isFlickering && caseData.status !== 'code-red' ? 'rgba(148, 148, 148, 0.7)' : undefined,
       }}
     >
       {/* Header */}
-      <div className={`px-4 py-3 ${statusBgColors[caseData.status]} border-b border-slate-700 flex items-center justify-between flex-shrink-0`}>
+      <div className={`relative px-4 py-3 ${statusBgColors[caseData.status]} border-b border-slate-700 flex items-center justify-between flex-shrink-0`}>
+        {!clientInChannel && (
+          <img
+            src={disconnectIcon}
+            alt=""
+            className="absolute inset-0 h-full w-auto object-cover pointer-events-none"
+            style={{ opacity: 0.4 }}
+          />
+        )}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <User className="w-4 h-4 text-slate-400 flex-shrink-0" />
@@ -542,6 +649,33 @@ export function CaseWindow({
               {caseData.scoopable === true && (
                 <div className="text-xs text-white border border-red-500/60 bg-red-500/10 rounded px-1.5 py-0.5">
                   Scoopable
+                </div>
+              )}
+              {caseData.scoopable === false && caseData.nearestScoopableStar && (
+                <div
+                  className="relative"
+                  onMouseEnter={() => {
+                    if (scoopableHideTimer.current) clearTimeout(scoopableHideTimer.current);
+                    setScoopableHover(true);
+                  }}
+                  onMouseLeave={() => {
+                    scoopableHideTimer.current = window.setTimeout(() => setScoopableHover(false), 150);
+                  }}
+                >
+                  <div className="text-xs text-white border border-slate-500/60 bg-slate-500/10 rounded px-1.5 py-0.5 cursor-default select-none">
+                    Scoopable
+                  </div>
+                  {scoopableHover && caseData.nearestScoopableStar && (
+                    <div ref={scoopablePopupRef} style={{ left: scoopablePopupOffset }} className="absolute bottom-full mb-1 z-50 bg-slate-900 border border-slate-600 rounded shadow-xl p-1 min-w-max">
+                      <button
+                        className="flex items-center gap-2 w-full text-left px-2 py-1 rounded hover:bg-slate-700/50 text-xs"
+                        onClick={() => navigator.clipboard.writeText(`${caseData.nearestScoopableStar!.name} (${caseData.nearestScoopableStar!.distance.toFixed(1)}ly)`)}
+                      >
+                        <span className="text-slate-400 font-mono flex-shrink-0">Nearest</span>
+                        <span className="text-slate-300">{caseData.nearestScoopableStar.name} ({caseData.nearestScoopableStar.distance.toFixed(1)}ly)</span>
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
               {(caseData.nearestLStation || caseData.nearestSmStation) && (
@@ -622,11 +756,12 @@ export function CaseWindow({
                 const nick = caseData.ratIrcNicks?.[rat] ?? rat;
                 const prog = caseData.ratProgress?.[rat] ?? caseData.ratProgress?.[nick] ?? {};
                 const stages: { key: keyof typeof prog; label: string }[] = [
-                  { key: 'fr',   label: 'FR'   },
-                  { key: 'wr',   label: 'WR'   },
-                  { key: 'bc',   label: 'BC'   },
-                  { key: 'fuel', label: 'FUEL' },
+                  { key: 'fr', label: 'FR' },
+                  { key: 'wr', label: 'WR' },
+                  { key: 'bc', label: 'BC' },
                 ];
+
+                const fueled = !!prog.fuel;
 
                 // Cascade: find the highest index with an explicit positive value;
                 // all stages below it are treated as positive too.
@@ -636,15 +771,14 @@ export function CaseWindow({
                 }, -1);
 
                 return (
-                  <div key={rat} className="flex items-center gap-2 text-xs">
-                    <span className="text-slate-400 w-24 truncate flex-shrink-0" title={rat}>{nick}</span>
+                  <div key={rat} className={`flex items-center gap-2 text-xs rounded px-1 ${fueled ? 'bg-green-500/20' : ''}`}>
+                    <span className={`w-24 truncate flex-shrink-0 ${fueled ? 'text-green-300' : 'text-slate-400'}`} title={rat}>{nick}</span>
                     <div className="flex items-center gap-1">
                       {stages.map(({ key, label }, idx) => {
                         const val = prog[key];
                         const explicitPositive = val === '+' || val === true;
                         const cascaded = idx < highestPositiveIdx;
                         const isPositive = explicitPositive || cascaded;
-                        // Only show negative if not overridden by a higher positive cascade
                         const isNegative = val === '-' && !cascaded;
                         return (
                           <span
@@ -668,37 +802,85 @@ export function CaseWindow({
             </div>
           )}
 
-          {/* Pinned jump calls */}
-          {caseData.jumpCalls && Object.keys(caseData.jumpCalls).length > 0 && (
-            <div className="px-3 py-1.5 border-b border-slate-700/60 bg-slate-800/30 flex items-center gap-3 flex-wrap flex-shrink-0">
-              <span className="text-xs text-slate-500 font-semibold flex-shrink-0">Jumps:</span>
-              {Object.entries(caseData.jumpCalls)
-                .sort((a, b) => a[1].jumps - b[1].jumps)
-                .map(([nick, call]) => {
-                  const totalSecs = call.jumps * 60;
-                  const etaSecs = Math.max(0, Math.floor(totalSecs - (Date.now() - call.timestamp.getTime()) / 1000));
-                  const arrived = etaSecs <= 0;
-                  const mins = Math.floor(etaSecs / 60);
-                  const secs = etaSecs % 60;
-                  const countdownStr = `${mins}:${secs.toString().padStart(2, '0')}`;
-                  // Red (hue 0) when first reported, green (hue 120) at zero
-                  const pct = totalSecs > 0 ? 1 - etaSecs / totalSecs : 1;
-                  const hue = Math.round(pct * 120);
-                  const timerColor = `hsl(${hue}, 80%, 55%)`;
-                  return (
-                    <span key={nick} className="text-xs" title={call.text}>
-                      <span className="text-slate-400">{nick}</span>
-                      <span className="text-orange-400 font-bold ml-1">{call.jumps}j</span>
-                      {!arrived && (
-                        <span className="ml-1 font-mono" style={{ color: timerColor }}>
-                          ({countdownStr})
-                        </span>
-                      )}
-                    </span>
-                  );
-                })}
-            </div>
-          )}
+          {/* Pinned jump calls + SC time */}
+          {((caseData.jumpCalls && Object.keys(caseData.jumpCalls).length > 0) || caseData.scDistanceLs !== undefined) && (() => {
+            const hasSco = caseData.platform.toLowerCase().includes('horizons') || caseData.platform.toLowerCase().includes('odyssey');
+            const activeShip = SCO_SHIPS.find(s => s.key === scoShip)!;
+            const scTotalSecs = caseData.scDistance !== undefined
+              ? distanceToSeconds(caseData.scDistance.ls, hasSco ? activeShip.speed : undefined)
+              : null;
+            const scEtaSecs = scTotalSecs !== null && caseData.scDistance
+              ? Math.max(0, Math.floor(scTotalSecs - (Date.now() - caseData.scDistance.timestamp.getTime()) / 1000))
+              : null;
+            const scArrived = scEtaSecs !== null && scEtaSecs <= 0;
+            const scPct = scTotalSecs && scTotalSecs > 0 && scEtaSecs !== null ? 1 - scEtaSecs / scTotalSecs : 1;
+            const scHue = Math.round(scPct * 120);
+            const scColor = `hsl(${scHue}, 80%, 55%)`;
+            const scMins = scEtaSecs !== null ? Math.floor(scEtaSecs / 60) : 0;
+            const scSecs = scEtaSecs !== null ? scEtaSecs % 60 : 0;
+            const scCountdown = `${scMins}:${scSecs.toString().padStart(2, '0')}`;
+            return (
+              <div className="px-3 py-1.5 border-b border-slate-700/60 bg-slate-800/30 flex items-center gap-3 flex-wrap flex-shrink-0">
+                {caseData.jumpCalls && Object.keys(caseData.jumpCalls).length > 0 && (
+                  <>
+                    <span className="text-xs text-slate-500 font-semibold flex-shrink-0">Jumps:</span>
+                    {Object.entries(caseData.jumpCalls)
+                      .sort((a, b) => a[1].jumps - b[1].jumps)
+                      .map(([nick, call]) => {
+                        const totalSecs = call.jumps * 60;
+                        const etaSecs = Math.max(0, Math.floor(totalSecs - (Date.now() - call.timestamp.getTime()) / 1000));
+                        const arrived = etaSecs <= 0;
+                        const mins = Math.floor(etaSecs / 60);
+                        const secs = etaSecs % 60;
+                        const countdownStr = `${mins}:${secs.toString().padStart(2, '0')}`;
+                        const pct = totalSecs > 0 ? 1 - etaSecs / totalSecs : 1;
+                        const hue = Math.round(pct * 120);
+                        const timerColor = `hsl(${hue}, 80%, 55%)`;
+                        return (
+                          <span key={nick} className="text-xs" title={call.text}>
+                            <span className="text-slate-400">{nick}</span>
+                            <span className="text-orange-400 font-bold ml-1">{call.jumps}j</span>
+                            {!arrived && (
+                              <span className="ml-1 font-mono" style={{ color: timerColor }}>
+                                ({countdownStr})
+                              </span>
+                            )}
+                          </span>
+                        );
+                      })}
+                  </>
+                )}
+                {scEtaSecs !== null && (
+                  <div className="relative ml-auto flex-shrink-0"
+                    onMouseEnter={() => { if (shipHideTimer.current) clearTimeout(shipHideTimer.current); if (hasSco) setShipHover(true); }}
+                    onMouseLeave={() => { shipHideTimer.current = window.setTimeout(() => setShipHover(false), 150); }}
+                  >
+                    <div className="text-xs text-white border border-slate-500/60 bg-slate-500/10 rounded px-1.5 py-0.5 cursor-default select-none flex items-center gap-1.5">
+                      <span className="text-slate-400">SC</span>
+                      {!scArrived
+                        ? <span className="font-mono" style={{ color: scColor }}>{scCountdown}</span>
+                        : <span className="font-mono text-green-400">arrived</span>}
+                      {hasSco && <span className="text-slate-500">· {activeShip.label} ▾</span>}
+                    </div>
+                    {shipHover && hasSco && (
+                      <div ref={shipPopupRef} style={{ left: shipPopupOffset }} className="absolute bottom-full mb-1 z-50 bg-slate-900 border border-slate-600 rounded shadow-xl p-1 min-w-max">
+                        {SCO_SHIPS.map((ship) => (
+                          <button
+                            key={ship.key}
+                            className={`flex items-center gap-2 w-full text-left px-2 py-1 rounded text-xs ${scoShip === ship.key ? 'bg-slate-700/70 text-white' : 'hover:bg-slate-700/50 text-slate-300'}`}
+                            onClick={() => { setScoShip(ship.key); setShipHover(false); }}
+                          >
+                            <span className="font-medium">{ship.label}</span>
+                            <span className="text-slate-500">{ship.speed.toLocaleString()} ls/s</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* Messages */}
           <div
@@ -878,6 +1060,19 @@ export function CaseWindow({
                           >
                             DeepL {deeplEnabled ? '(ON)' : '(OFF)'}
                           </Button>
+                          {deeplEnabled && deeplUsage && (
+                            <div className="mt-1 px-0.5">
+                              <div className="w-full bg-slate-700 rounded-full h-1.5">
+                                <div
+                                  className="bg-blue-500 h-1.5 rounded-full transition-all"
+                                  style={{ width: `${Math.min(100, (deeplUsage.count / deeplUsage.limit) * 100).toFixed(1)}%` }}
+                                />
+                              </div>
+                              <p className="text-xs text-slate-500 text-right mt-0.5">
+                                {((deeplUsage.count / deeplUsage.limit) * 100).toFixed(1)}% used
+                              </p>
+                            </div>
+                          )}
                           {showApiKeyInput && (
                             <div className="flex gap-1 mt-1">
                               <Input

@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { IRCConnectionStatus } from '../services/ircWebSocket';
 
 const IRC_URL_KEY = 'fr_irc_ws_url';
+export const PROXY_URL_KEY = 'fr_deepl_proxy_url';
+export const DEFAULT_PROXY_URL = 'http://localhost:8081';
 
 interface IRCConnectionPanelProps {
   status: IRCConnectionStatus;
@@ -25,6 +27,7 @@ export function IRCConnectionPanel({
   embedded = false,
 }: IRCConnectionPanelProps) {
   const [wsUrl, setWsUrl] = useState(() => localStorage.getItem(IRC_URL_KEY) || 'ws://localhost:8080');
+  const [proxyUrl, setProxyUrl] = useState(() => localStorage.getItem(PROXY_URL_KEY) || DEFAULT_PROXY_URL);
   const [isExpanded, setIsExpanded] = useState(false);
   const [launchHint, setLaunchHint] = useState(false);
   const [autoLaunch, setAutoLaunch] = useState(() => localStorage.getItem('fr_auto_launch') === 'true');
@@ -64,6 +67,7 @@ export function IRCConnectionPanel({
   const handleConnect = () => {
     if (wsUrl.trim()) {
       localStorage.setItem(IRC_URL_KEY, wsUrl.trim());
+      if (proxyUrl.trim()) localStorage.setItem(PROXY_URL_KEY, proxyUrl.trim());
       onConnect(wsUrl.trim());
     }
   };
@@ -105,6 +109,17 @@ export function IRCConnectionPanel({
           disabled={status === 'connected' || status === 'connecting'}
           placeholder="ws://localhost:8080"
           className="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1 text-sm text-white placeholder-slate-500 disabled:opacity-50"
+        />
+      </div>
+      <div>
+        <label className="block text-xs text-slate-400 mb-1">DeepL Proxy URL</label>
+        <input
+          type="text"
+          value={proxyUrl}
+          onChange={(e) => setProxyUrl(e.target.value)}
+          onBlur={() => { if (proxyUrl.trim()) localStorage.setItem(PROXY_URL_KEY, proxyUrl.trim()); }}
+          placeholder="http://localhost:8081"
+          className="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1 text-sm text-white placeholder-slate-500"
         />
       </div>
       <div>

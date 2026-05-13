@@ -12,8 +12,35 @@ export default defineConfig({
   ],
   resolve: {
     alias: {
-      // Alias @ to the src directory
       '@': path.resolve(__dirname, './src'),
+    },
+  },
+  server: {
+    proxy: {
+      '/deepl-proxy': {
+        target: 'https://api-free.deepl.com',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/deepl-proxy/, ''),
+      },
+      '/deepl-proxy-pro': {
+        target: 'https://api.deepl.com',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/deepl-proxy-pro/, ''),
+      },
+    },
+  },
+  preview: {
+    proxy: {
+      '/deepl-proxy': {
+        target: 'https://api-free.deepl.com',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/deepl-proxy/, ''),
+      },
+      '/deepl-proxy-pro': {
+        target: 'https://api.deepl.com',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/deepl-proxy-pro/, ''),
+      },
     },
   },
 })

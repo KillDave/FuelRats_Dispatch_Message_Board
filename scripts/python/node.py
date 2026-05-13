@@ -4,6 +4,8 @@ import json
 import sys
 import os
 import logging
+import urllib.request
+import urllib.error
 from datetime import datetime, timezone
 import traceback
 
@@ -14,9 +16,129 @@ logging.getLogger("websockets.server").setLevel(logging.CRITICAL)
 
 IRC_HOST = "127.0.0.1"
 IRC_PORT = 12346
-WS_PORT = 8080
 PROTOCOL = "fr-dispatch"
 VERSION = "1.0.0"
+
+def load_config():
+    base = os.path.dirname(sys.executable if getattr(sys, 'frozen', False) else os.path.abspath(__file__))
+    for path in [os.path.join(base, 'bridge-config.json'), os.path.join(base, '..', 'bridge-config.json')]:
+        try:
+            with open(os.path.normpath(path)) as f:
+                cfg = json.load(f)
+                print(f"OK Loaded config: {os.path.normpath(path)}")
+                return cfg
+        except FileNotFoundError:
+            continue
+        except Exception as e:
+            print(f"WARN bridge-config.json error: {e}")
+    return {}
+
+_cfg       = load_config()
+WS_PORT    = int(_cfg.get('ws_port',    8080))
+PROXY_PORT = int(_cfg.get('proxy_port', 8081))
+
+# ── DeepL proxy (runs on same port as WebSocket via process_request) ──────────
+
+def _deepl_forward(path, headers, body):
+    if path.startswith('/deepl-proxy-pro/'):
+        target = 'https://api.deepl.com' + path[len('/deepl-proxy-pro'):]
+    else:
+        target = 'https://api-free.deepl.com' + path[len('/deepl-proxy'):]
+
+    if body:
+        try:
+            text = json.loads(body).get('text', [''])[0]
+            print(f"[DeepL] Translating: {text}")
+        except Exception:
+            pass
+
+    req = urllib.request.Request(
+        target,
+        data=body,
+        headers={
+            'Authorization': headers.get('Authorization', headers.get('authorization', '')),
+            'Content-Type': headers.get('Content-Type', headers.get('content-type', 'application/json')),
+        },
+        method='GET' if not body else 'POST',
+    )
+
+    try:
+        with urllib.request.urlopen(req) as resp:
+            data = resp.read()
+            try:
+                result = json.loads(data).get('translations', [{}])[0].get('text', '')
+                print(f"[DeepL] Response: {result}")
+            except Exception:
+                pass
+            return resp.status, resp.headers.get('Content-Type', 'application/json'), data
+    except urllib.error.HTTPError as e:
+        data = e.read()
+        print(f"[DeepL] Error {e.code}: {data.decode('utf-8', errors='replace')}")
+        return e.code, 'application/json', data
+    except Exception as e:
+        print(f"[DeepL] Failed: {e}")
+        return 502, 'text/plain', str(e).encode()
+
+PROXY_PORT = 8081
+CORS = (
+    'Access-Control-Allow-Origin: *\r\n'
+    'Access-Control-Allow-Headers: Authorization, Content-Type\r\n'
+    'Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n'
+)
+
+async def handle_deepl_http(reader, writer):
+    try:
+        data = b''
+        while b'\r\n\r\n' not in data:
+            chunk = await reader.read(4096)
+            if not chunk:
+                return
+            data += chunk
+
+        header_end = data.index(b'\r\n\r\n')
+        header_text = data[:header_end].decode('utf-8', errors='replace')
+        body_so_far = data[header_end + 4:]
+
+        lines = header_text.split('\r\n')
+        method, path, _ = lines[0].split(' ', 2)
+        headers = {}
+        for line in lines[1:]:
+            if ':' in line:
+                k, _, v = line.partition(':')
+                headers[k.strip().lower()] = v.strip()
+
+        if method == 'OPTIONS':
+            writer.write(f'HTTP/1.1 204 No Content\r\n{CORS}Content-Length: 0\r\n\r\n'.encode())
+            await writer.drain()
+            return
+
+        content_length = int(headers.get('content-length', 0))
+        body = body_so_far
+        while len(body) < content_length:
+            chunk = await reader.read(content_length - len(body))
+            if not chunk:
+                break
+            body += chunk
+
+        status, content_type, resp_body = await asyncio.get_event_loop().run_in_executor(
+            None, _deepl_forward, path, headers, body if body else None
+        )
+
+        response = (
+            f'HTTP/1.1 {status} OK\r\n'
+            f'Content-Type: {content_type}\r\n'
+            f'Content-Length: {len(resp_body)}\r\n'
+            f'{CORS}\r\n'
+        ).encode() + resp_body
+        writer.write(response)
+        await writer.drain()
+    except Exception as e:
+        print(f"[DeepL] HTTP error: {e}")
+    finally:
+        try:
+            writer.close()
+        except Exception:
+            pass
 
 # ── Registry helpers (Windows only) ──────────────────────────────────────────
 
@@ -263,17 +385,21 @@ async def main():
     print("=" * 60)
 
     try:
+        proxy_server = await asyncio.start_server(handle_deepl_http, '127.0.0.1', PROXY_PORT)
+        print(f"OK DeepL proxy listening on port {PROXY_PORT}")
+
         async with websockets.serve(
             handle_client,
             "127.0.0.1",
             WS_PORT,
             ping_interval=20,
-            ping_timeout=10
+            ping_timeout=10,
         ):
             print(f"OK WebSocket bridge listening on port {WS_PORT}")
             print("Waiting for dispatch board connection...")
             print()
-            await asyncio.Future()
+            async with proxy_server:
+                await asyncio.Future()
     except OSError as e:
         if "address already in use" in str(e).lower():
             print(f"INFO Bridge already running on port {WS_PORT}, exiting.")

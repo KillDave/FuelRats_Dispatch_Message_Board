@@ -626,22 +626,26 @@ export class FuelRatsApiService {
     const caseId = `case-${attrs.commandIdentifier.toString().padStart(2, '0')}`;
     const caseNum = attrs.commandIdentifier;
 
-    // Scan quote messages for rat progress and jump calls
+    // Scan quote messages for rat progress, jump calls, and SC distances
     type RatStage = { fr?: '+' | '-'; wr?: '+' | '-'; bc?: '+' | '-'; fuel?: boolean };
     const ratProgress: Record<string, RatStage> = {};
     const jumpCalls: Record<string, { jumps: number; text: string; timestamp: Date }> = {};
+    let scDistance: { ls: number; timestamp: Date } | undefined;
 
     const statusPatterns: [RegExp, keyof RatStage, '+' | '-' | true][] = [
       [/\bfr\s*\+/i,        'fr',   '+'],
       [/\bfr\s*-/i,         'fr',   '-'],
       [/\b(?:wr|tm)\s*\+/i, 'wr',   '+'],
       [/\b(?:wr|tm)\s*-/i,  'wr',   '-'],
-      [/\bbc\s*\+/i,        'bc',   '+'],
-      [/\bbc\s*-/i,         'bc',   '-'],
+      [/\b(?:bc|inst)\s*\+/i, 'bc', '+'],
+      [/\b(?:bc|inst)\s*-/i,  'bc', '-'],
       [/\bfuel\s*\+/i,      'fuel', true],
     ];
 
-    const jumpPattern = new RegExp(`#${caseNum}\\s+(\\d+)j\\b`, 'i');
+    // Matches "#2 4j" or "4j #2" in either order
+    const jumpPattern = new RegExp(`(?:#${caseNum}\\s+(\\d+)j|(\\d+)j\\s+#${caseNum})\\b`, 'i');
+    const extractJumps = (m: RegExpMatchArray) => parseInt(m[1] ?? m[2], 10);
+    const caseNumPattern = new RegExp(`#${caseNum}\\b`);
 
     for (const msg of messages) {
       if (msg.isSystem || !msg.sender || !msg.text) continue;
@@ -651,7 +655,18 @@ export class FuelRatsApiService {
       // Jump calls
       const jumpMatch = text.match(jumpPattern);
       if (jumpMatch) {
-        jumpCalls[sender] = { jumps: parseInt(jumpMatch[1], 10), text, timestamp: msg.timestamp };
+        jumpCalls[sender] = { jumps: extractJumps(jumpMatch), text, timestamp: msg.timestamp };
+      }
+
+      // SC distance: "#N ... X.Xly/ls/au"
+      if (caseNumPattern.test(text)) {
+        const distMatch = text.match(/([\d]*\.?[\d]+)\s*(ls|ly|au)\b/i);
+        if (distMatch) {
+          const val = parseFloat(distMatch[1]);
+          const unit = distMatch[2].toLowerCase();
+          const ls = unit === 'ly' ? val * 31_557_600 : unit === 'au' ? val * 499 : val;
+          scDistance = { ls, timestamp: msg.timestamp };
+        }
       }
 
       // Status patterns
@@ -679,6 +694,13 @@ export class FuelRatsApiService {
       ratIrcNicks[unmatchedRats[0]] = unclaimedActiveNicks[0];
     }
 
+    // Determine client channel presence from the last MechaSqueak join/leave quote
+    const lastPresenceQuote = [...attrs.quotes].reverse().find((q) =>
+      q.author === 'MechaSqueak[BOT]' &&
+      (q.message === 'Client left the rescue channel' || q.message === 'Client rejoined the rescue channel')
+    );
+    const clientInChannel = lastPresenceQuote?.message !== 'Client left the rescue channel';
+
     return {
       id: caseId,
       apiId: rescue.id, // Store the API's UUID for WebSocket event matching
@@ -693,8 +715,10 @@ export class FuelRatsApiService {
       ratIrcNicks,
       oxygenStatus: attrs.codeRed ? 'CRITICAL' : undefined,
       landmark: attrs.data.landmark || undefined,
+      scDistance,
       ratProgress: Object.keys(ratProgress).length > 0 ? ratProgress : undefined,
       jumpCalls: Object.keys(jumpCalls).length > 0 ? jumpCalls : undefined,
+      clientInChannel,
       createdAt: new Date(attrs.createdAt)
     };
   }

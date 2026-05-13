@@ -27,9 +27,10 @@ export async function translateText(text: string, targetLang = 'EN'): Promise<st
   const apiKey = getDeepLApiKey();
   if (!apiKey) return null;
 
-  // Free-tier keys end in :fx and use a different subdomain
+  // Route through the local bridge proxy to avoid CORS — port is user-configurable
+  const proxyBase = localStorage.getItem('fr_deepl_proxy_url') || 'http://localhost:8081';
   const isFree = apiKey.endsWith(':fx');
-  const baseUrl = isFree ? 'https://api-free.deepl.com' : 'https://api.deepl.com';
+  const baseUrl = isFree ? `${proxyBase}/deepl-proxy` : `${proxyBase}/deepl-proxy-pro`;
 
   try {
     const res = await fetch(`${baseUrl}/v2/translate`, {

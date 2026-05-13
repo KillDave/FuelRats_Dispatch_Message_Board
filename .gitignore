@@ -55,10 +55,12 @@ QUICKSTART.md
 Response_Rescue
 START_HERE.md
 FuelRatAPI_Claude_Chat.txt
+FuelRats_API_v4.0.0.json
 
 # Build artifacts
 *.zip
 bridge-dist/
+/release
 
 # Debug/troubleshooting docs
 ERROR_SUMMARY.txt
