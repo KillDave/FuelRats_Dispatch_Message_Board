@@ -660,11 +660,15 @@ export class FuelRatsApiService {
 
       // SC distance: "#N ... X.Xly/ls/au"
       if (caseNumPattern.test(text)) {
-        const distMatch = text.match(/([\d]*\.?[\d]+)\s*(ls|ly|au)\b/i);
+        const distMatch = text.match(/([\d]*\.?[\d]+)\s*(Mls|kls|ls|ly|au)\b/i);
         if (distMatch) {
           const val = parseFloat(distMatch[1]);
           const unit = distMatch[2].toLowerCase();
-          const ls = unit === 'ly' ? val * 31_557_600 : unit === 'au' ? val * 499 : val;
+          const ls = unit === 'ly' ? val * 31_557_600
+            : unit === 'au' ? val * 499
+            : unit === 'kls' ? val * 1_000
+            : unit === 'mls' ? val * 1_000_000
+            : val;
           scDistance = { ls, timestamp: msg.timestamp };
         }
       }

@@ -140,6 +140,7 @@ export function CaseWindow({
   const scoopableHideTimer = useRef<number | null>(null);
   const scoopablePopupRef = useRef<HTMLDivElement>(null);
   const [scoShip, setScoShip] = useState<ScoShipKey>('cobra');
+  const [gravityMode, setGravityMode] = useState(false);
   const [shipHover, setShipHover] = useState(false);
   const [shipPopupOffset, setShipPopupOffset] = useState(0);
   const shipHideTimer = useRef<number | null>(null);
@@ -294,7 +295,8 @@ export function CaseWindow({
     }
   }, [caseData.messages, caseData.createdAt]);
 
-  // Returns unique speakers from messages in last-spoke order (most recent first)
+  // Returns unique speakers from messages in last-spoke order (most recent first).
+  // Always includes the client's IRC nick / CMDR name so TAB works before they've spoken.
   const getLastSpokeOrder = (): string[] => {
     const seen = new Set<string>();
     const result: string[] = [];
@@ -304,6 +306,10 @@ export function CaseWindow({
         seen.add(msg.sender);
         result.push(msg.sender);
       }
+    }
+    const clientNick = caseData.ircNick || caseData.clientName;
+    if (clientNick && !seen.has(clientNick)) {
+      result.push(clientNick);
     }
     return result;
   };
@@ -806,9 +812,11 @@ export function CaseWindow({
           {((caseData.jumpCalls && Object.keys(caseData.jumpCalls).length > 0) || caseData.scDistance !== undefined) && (() => {
             const hasSco = caseData.platform.toLowerCase().includes('horizons') || caseData.platform.toLowerCase().includes('odyssey');
             const activeShip = SCO_SHIPS.find(s => s.key === scoShip)!;
-            const scTotalSecs = caseData.scDistance !== undefined
+            const scBaseSecs = caseData.scDistance !== undefined
               ? distanceToSeconds(caseData.scDistance.ls, hasSco ? activeShip.speed : undefined)
               : null;
+            // Gravity multiplier: ~1.5× for planetary exclusion zone slowdown
+            const scTotalSecs = scBaseSecs !== null ? scBaseSecs * (gravityMode ? 1.5 : 1) : null;
             const scEtaSecs = scTotalSecs !== null && caseData.scDistance
               ? Math.max(0, Math.floor(scTotalSecs - (Date.now() - caseData.scDistance.timestamp.getTime()) / 1000))
               : null;
@@ -851,31 +859,47 @@ export function CaseWindow({
                   </>
                 )}
                 {scEtaSecs !== null && (
-                  <div className="relative ml-auto flex-shrink-0"
-                    onMouseEnter={() => { if (shipHideTimer.current) clearTimeout(shipHideTimer.current); if (hasSco) setShipHover(true); }}
-                    onMouseLeave={() => { shipHideTimer.current = window.setTimeout(() => setShipHover(false), 150); }}
-                  >
-                    <div className="text-xs text-white border border-slate-500/60 bg-slate-500/10 rounded px-1.5 py-0.5 cursor-default select-none flex items-center gap-1.5">
-                      <span className="text-slate-400">SC</span>
-                      {!scArrived
-                        ? <span className="font-mono" style={{ color: scColor }}>{scCountdown}</span>
-                        : <span className="font-mono text-green-400">arrived</span>}
-                      {hasSco && <span className="text-slate-500">· {activeShip.label} ▾</span>}
-                    </div>
-                    {shipHover && hasSco && (
-                      <div ref={shipPopupRef} style={{ left: shipPopupOffset }} className="absolute bottom-full mb-1 z-50 bg-slate-900 border border-slate-600 rounded shadow-xl p-1 min-w-max">
-                        {SCO_SHIPS.map((ship) => (
-                          <button
-                            key={ship.key}
-                            className={`flex items-center gap-2 w-full text-left px-2 py-1 rounded text-xs ${scoShip === ship.key ? 'bg-slate-700/70 text-white' : 'hover:bg-slate-700/50 text-slate-300'}`}
-                            onClick={() => { setScoShip(ship.key); setShipHover(false); }}
-                          >
-                            <span className="font-medium">{ship.label}</span>
-                            <span className="text-slate-500">{ship.speed.toLocaleString()} ls/s</span>
-                          </button>
-                        ))}
+                  <div className="ml-auto flex-shrink-0 flex items-center gap-1.5">
+                    {/* Gravity toggle */}
+                    <button
+                      onClick={() => setGravityMode(g => !g)}
+                      title="Toggle gravity limitation (×1.5 for planetary approach)"
+                      className={`text-xs border rounded px-1.5 py-0.5 select-none transition-colors ${
+                        gravityMode
+                          ? 'border-amber-500/70 bg-amber-500/15 text-amber-400'
+                          : 'border-slate-600 bg-slate-700/30 text-slate-500 hover:text-slate-300'
+                      }`}
+                    >
+                      ⚖ Grav
+                    </button>
+
+                    {/* SC countdown chip */}
+                    <div className="relative"
+                      onMouseEnter={() => { if (shipHideTimer.current) clearTimeout(shipHideTimer.current); if (hasSco) setShipHover(true); }}
+                      onMouseLeave={() => { shipHideTimer.current = window.setTimeout(() => setShipHover(false), 150); }}
+                    >
+                      <div className="text-xs text-white border border-slate-500/60 bg-slate-500/10 rounded px-1.5 py-0.5 cursor-default select-none flex items-center gap-1.5">
+                        <span className="text-slate-400">SC</span>
+                        {!scArrived
+                          ? <span className="font-mono" style={{ color: scColor }}>{scCountdown}</span>
+                          : <span className="font-mono text-green-400">arrived</span>}
+                        {hasSco && <span className="text-slate-500">· {activeShip.label} ▾</span>}
                       </div>
-                    )}
+                      {shipHover && hasSco && (
+                        <div ref={shipPopupRef} style={{ left: shipPopupOffset }} className="absolute bottom-full mb-1 z-50 bg-slate-900 border border-slate-600 rounded shadow-xl p-1 min-w-max">
+                          {SCO_SHIPS.map((ship) => (
+                            <button
+                              key={ship.key}
+                              className={`flex items-center gap-2 w-full text-left px-2 py-1 rounded text-xs ${scoShip === ship.key ? 'bg-slate-700/70 text-white' : 'hover:bg-slate-700/50 text-slate-300'}`}
+                              onClick={() => { setScoShip(ship.key); setShipHover(false); }}
+                            >
+                              <span className="font-medium">{ship.label}</span>
+                              <span className="text-slate-500">{ship.speed.toLocaleString()} ls/s</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>

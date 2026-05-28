@@ -1,8 +1,9 @@
-import { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { CaseWindow } from './CaseWindow';
+import { RatBoard } from './RatBoard';
 import { MessageEditorPage } from './MessageEditorPage';
 import { Button } from '@/app/components/ui/button';
-import { Eye, EyeOff, Sidebar, User, MapPin, AlertTriangle, Clock, LogOut, Plus } from 'lucide-react';
+import { Eye, EyeOff, Sidebar, User, MapPin, AlertTriangle, Clock, LogOut, Plus, Shield, ChevronDown, MessageSquare } from 'lucide-react';
 import { fuelRatsApi } from '../services/fuelRatsApi';
 import { ircWebSocket, IRCMessage, IRCConnectionStatus } from '../services/ircWebSocket';
 import { IRCConnectionPanel } from './IRCConnectionPanel';
@@ -135,8 +136,80 @@ function loadButtonGroups(): QuickMessageGroup[] {
   return DEFAULT_BUTTON_GROUPS;
 }
 
+function HeaderMenu({
+  view,
+  onSetView,
+  onAddCase,
+  onLogout,
+}: {
+  view: string;
+  onSetView: (v: 'board' | 'rat' | 'editor') => void;
+  onAddCase: () => void;
+  onLogout?: () => void;
+}) {
+  const [open, setOpen] = React.useState(false);
+  const ref = React.useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="flex items-center gap-1.5 px-3 py-1.5 text-xs border border-slate-700 rounded text-slate-400 hover:text-white hover:border-slate-500 transition-colors"
+      >
+        <ChevronDown className="w-3 h-3" />
+        Menu
+      </button>
+      {open && (
+        <div className="absolute top-full right-0 mt-1 z-50 bg-slate-900 border border-slate-600 rounded shadow-xl p-1 min-w-max">
+          <button
+            onClick={() => { onSetView(view === 'rat' ? 'board' : 'rat'); setOpen(false); }}
+            className={`flex items-center gap-2 w-full text-left px-3 py-1.5 rounded text-xs transition-colors ${view === 'rat' ? 'text-orange-400 bg-orange-500/10' : 'text-slate-300 hover:bg-slate-700/50'}`}
+          >
+            <Shield className="w-3 h-3" />
+            {view === 'rat' ? 'Dispatch Mode' : 'Rat Mode'}
+          </button>
+          <button
+            onClick={() => { onSetView('editor'); setOpen(false); }}
+            className="flex items-center gap-2 w-full text-left px-3 py-1.5 rounded text-xs text-slate-300 hover:bg-slate-700/50 transition-colors"
+          >
+            <MessageSquare className="w-3 h-3" />
+            Edit Messages
+          </button>
+          <button
+            onClick={() => { onAddCase(); setOpen(false); }}
+            className="flex items-center gap-2 w-full text-left px-3 py-1.5 rounded text-xs text-slate-300 hover:bg-slate-700/50 transition-colors"
+          >
+            <Plus className="w-3 h-3" />
+            Add Case
+          </button>
+          {onLogout && (
+            <>
+              <div className="my-1 border-t border-slate-700/60" />
+              <button
+                onClick={() => { onLogout(); setOpen(false); }}
+                className="flex items-center gap-2 w-full text-left px-3 py-1.5 rounded text-xs text-red-400 hover:bg-red-500/10 transition-colors"
+              >
+                <LogOut className="w-3 h-3" />
+                Sign out
+              </button>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
-  const [view, setView] = useState<'board' | 'editor'>('board');
+  const [view, setView] = useState<'board' | 'rat' | 'editor'>('board');
   const [buttonGroups, setButtonGroups] = useState<QuickMessageGroup[]>(loadButtonGroups);
   const [useApiData] = useState(true); // API active by default
   const [cases, setCases] = useState<Case[]>(initialCases);
@@ -220,7 +293,8 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
               if (existingMessageIds.has(msg.id)) return false;
               const recentDupe = existingCase.messages.some(
                 (m) => m.text === msg.text &&
-                  Math.abs(m.timestamp.getTime() - msg.timestamp.getTime()) < 5000
+                  m.sender === msg.sender &&
+                  Math.abs(m.timestamp.getTime() - msg.timestamp.getTime()) < 30000
               );
               return !recentDupe;
             });
@@ -512,21 +586,45 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
 
     if ((ircMsg.type !== 'message' && ircMsg.type !== 'notice') || !ircMsg.nick || !ircMsg.text) return;
 
-    // Detect MechaSqueak nick-change notice and update ircNick immediately,
+    // Detect MechaSqueak nick-change notices and update ircNick immediately,
     // before the API has a chance to reflect the new value.
-    // Format: "Caution: Client of case #7 (old name) has changed IRC nick to newNick"
-    const nickChangeMatch = ircMsg.text.match(/Client of case #(\d+) .+ has changed IRC nick to (\S+)/i);
+    // Format A: "Caution: Client of case #7 (old name) has changed IRC nick to newNick"
+    // Format B: "CAUTION: The latest signal for case #1 has new information: IRC Nick: OldNick -> NewNick"
+    //   (Format B fires when a client quits and rejoins under a different nick)
+    const nickChangeMatch =
+      ircMsg.text.match(/Client of case #(\d+) .+ has changed IRC nick to (\S+)/i) ||
+      ircMsg.text.match(/latest signal for case #(\d+) has new information: IRC Nick: \S+ -> (\S+)/i);
     if (nickChangeMatch && ircMsg.nick?.toLowerCase().includes('mechasqueak')) {
       const caseNum = parseInt(nickChangeMatch[1], 10);
       const newNick = nickChangeMatch[2];
       const caseId = `case-${caseNum.toString().padStart(2, '0')}`;
-      setCases((prev) => prev.map((c) => c.id === caseId ? { ...c, ircNick: newNick } : c));
+      // Mark client as in-channel: format B means they just rejoined under the new nick
+      setCases((prev) => prev.map((c) => c.id === caseId ? { ...c, ircNick: newNick, clientInChannel: true } : c));
     }
 
     const isNotice = ircMsg.type === 'notice';
 
-    setCases((prev) =>
-      prev.map((c) => {
+    setCases((prev) => {
+      // For notices with <SenderNick> format, pre-compute the single best-matching case
+      // (the one where that sender most recently spoke) to avoid attaching translations
+      // to every case window where the dispatcher has ever sent a message.
+      let singleNoticeTargetId: string | null = null;
+      const innerNickForNotice = isNotice ? ircMsg.text.match(/^<([^>]+)>/) : null;
+      if (innerNickForNotice) {
+        const senderNick = innerNickForNotice[1].toLowerCase();
+        let latestTime = -1;
+        for (const c of prev) {
+          const lastMsg = [...c.messages].reverse().find(
+            (m) => !m.isSystem && m.sender.toLowerCase() === senderNick
+          );
+          if (lastMsg && lastMsg.timestamp.getTime() > latestTime) {
+            latestTime = lastMsg.timestamp.getTime();
+            singleNoticeTargetId = c.id;
+          }
+        }
+      }
+
+      return prev.map((c) => {
         // Match by case number, IRC nick (exact), fuzzy client name, or text mention
         const nickLower = ircMsg.nick!.toLowerCase();
         const textLower = ircMsg.text.toLowerCase();
@@ -562,10 +660,12 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
         // since they aren't sent to a channel
         const isPrivateNotice = isNotice && !ircMsg.channel?.startsWith('#');
 
-        // Also check if the effective nick (from <SenderNick> in notices) recently sent
-        // a message in this case — handles dispatcher's own translations
-        const hasRecentMessage = isNotice && c.messages.some(
-          (msg) => !msg.isSystem && msg.sender.toLowerCase() === effectiveNickLower
+        // For <SenderNick> notices, restrict to the single most-recently-active case for
+        // that sender; otherwise any case where the dispatcher has sent a message matches.
+        const hasRecentMessage = isNotice && (
+          singleNoticeTargetId
+            ? c.id === singleNoticeTargetId
+            : c.messages.some((msg) => !msg.isSystem && msg.sender.toLowerCase() === effectiveNickLower)
         );
 
         const isForThisCase =
@@ -603,13 +703,14 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
           // If we can't match to an original message, fall through and add as separate notice
         }
 
-        // Deduplicate only against API-sourced messages — catches the IRC/API race where
-        // the same content arrives via both streams, without suppressing identical messages
-        // from different IRC users.
+        // Deduplicate against API-sourced messages AND same-sender IRC messages.
+        // Same-sender check prevents echo of locally-sent messages showing twice,
+        // while still allowing two different rats to say identical text (e.g. "fr+").
+        const incomingNick = (ircMsg.nick || '').toLowerCase();
         const isDuplicate = c.messages.some(
-          (msg) => !msg.isIRC &&
-            msg.text === displayText &&
-            (Date.now() - msg.timestamp.getTime()) < 5000
+          (msg) => msg.text === displayText &&
+            (Date.now() - msg.timestamp.getTime()) < 5000 &&
+            (!msg.isIRC || msg.sender.toLowerCase() === incomingNick)
         );
 
         if (isDuplicate) return c;
@@ -637,10 +738,12 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
         let updatedRatIrcNicks = c.ratIrcNicks;
 
         // Update client channel presence from live MechaSqueak messages
+        // MechaSqueak formats: "Caution: Client of case #N (name) has left!"
+        //                      "PC case #N (name) in "..." (...) has rejoined!"
         let updatedClientInChannel = c.clientInChannel;
         if (ircMsg.nick?.toLowerCase().includes('mechasqueak')) {
-          if (displayText === 'Client left the rescue channel') updatedClientInChannel = false;
-          else if (displayText === 'Client rejoined the rescue channel') updatedClientInChannel = true;
+          if (/has left[!.]?\s*$/i.test(displayText)) updatedClientInChannel = false;
+          else if (/has rejoined[!.]?\s*$/i.test(displayText)) updatedClientInChannel = true;
         }
 
         // PRIMARY: learn nick → CMDR from MechaSqueak's response to !gofr/!go
@@ -669,13 +772,19 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
         const caseNum = parseInt(c.id.split('-')[1], 10);
 
         // Detect SC distance reports: "#N ... X.Xly/ls/au" (e.g. "#6 bc+ .41ly")
+        // Skip bot messages — MechaSqueak announcements include system distances (e.g. "97.6 LY from Sol")
+        const isBotNick = ircMsg.nick?.toLowerCase().includes('mechasqueak') ?? false;
         let updatedScDistance = c.scDistance;
-        if (new RegExp(`#${caseNum}\\b`).test(displayText)) {
-          const distMatch = displayText.match(/([\d]*\.?[\d]+)\s*(ls|ly|au)\b/i);
+        if (!isBotNick && new RegExp(`#${caseNum}\\b`).test(displayText)) {
+          const distMatch = displayText.match(/([\d]*\.?[\d]+)\s*(Mls|kls|ls|ly|au)\b/i);
           if (distMatch) {
             const val = parseFloat(distMatch[1]);
             const unit = distMatch[2].toLowerCase();
-            const ls = unit === 'ly' ? val * 31_557_600 : unit === 'au' ? val * 499 : val;
+            const ls = unit === 'ly' ? val * 31_557_600
+              : unit === 'au' ? val * 499
+              : unit === 'kls' ? val * 1_000
+              : unit === 'mls' ? val * 1_000_000
+              : val;
             updatedScDistance = { ls, timestamp: ircMsg.timestamp };
           }
         }
@@ -728,8 +837,8 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
           clientInChannel: updatedClientInChannel,
           messages: [...c.messages, newMessage],
         };
-      })
-    );
+      });
+    });
   };
 
   const handleIRCConnect = (url: string) => {
@@ -885,7 +994,7 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
       />
       
       {/* Header */}
-      <div className="bg-slate-900/90 backdrop-blur-sm border-b border-slate-700 px-6 py-4 flex-shrink-0 relative z-10">
+      <div className="bg-slate-900/90 backdrop-blur-sm border-b border-slate-700 px-6 py-4 flex-shrink-0 relative z-20">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
             <Button
@@ -903,33 +1012,12 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
                 {cases.filter((c) => c.status === 'code-red').length}
               </p>
             </div>
-            <div className="flex items-center rounded border border-slate-700 overflow-hidden">
-              <button
-                onClick={() => setView('editor')}
-                className="px-3 py-1.5 text-xs text-slate-400 hover:text-orange-400 hover:bg-orange-500/10 border-r border-slate-700 transition-colors"
-                title="Edit quick messages"
-              >
-                Messages
-              </button>
-              <button
-                onClick={() => setShowAddCase(true)}
-                className="flex items-center gap-1 px-3 py-1.5 text-xs text-slate-400 hover:text-green-400 hover:bg-green-500/10 border-r border-slate-700 transition-colors"
-                title="Add a new case"
-              >
-                <Plus className="w-3 h-3" />
-                Add Case
-              </button>
-              {onLogout && (
-                <button
-                  onClick={onLogout}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition-colors"
-                  title="Sign out"
-                >
-                  <LogOut className="w-3 h-3" />
-                  Sign out
-                </button>
-              )}
-            </div>
+            <HeaderMenu
+              view={view}
+              onSetView={setView}
+              onAddCase={() => setShowAddCase(true)}
+              onLogout={onLogout}
+            />
           </div>
 
           {/* Status Legend with UTC Time */}
@@ -958,6 +1046,9 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
       </div>
 
       {/* Main Content Area */}
+      {view === 'rat' ? (
+        <RatBoard cases={cases} />
+      ) : (
       <div className="flex-1 flex min-h-0 relative z-10">
         {/* Sidebar */}
         {sidebarOpen && (
@@ -1135,7 +1226,7 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
           )}
         </div>
       </div>
-
+      )}
 
     </div>
 

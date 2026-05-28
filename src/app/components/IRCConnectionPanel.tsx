@@ -51,8 +51,8 @@ export function IRCConnectionPanel({
     let timer: number;
     const probe = new WebSocket(wsUrl.trim());
     probe.onopen = () => {
+      probe.onclose = () => onConnect(wsUrl.trim());
       probe.close();
-      onConnect(wsUrl.trim());
     };
     probe.onerror = () => {
       window.location.href = 'fr-dispatch://launch';
