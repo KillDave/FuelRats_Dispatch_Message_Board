@@ -106,7 +106,7 @@ export function DeepLTestPage({ onBack }: { onBack: () => void }) {
 
   return (
     <div className="min-h-screen bg-slate-950 text-white">
-      <div className="p-6 flex flex-col gap-6 max-w-2xl mx-auto">
+      <div className="p-6 flex flex-col gap-6">
       <div className="flex items-center gap-4">
         <Button variant="outline" size="sm" onClick={onBack} className="border-slate-600 text-slate-300">
           ← Back

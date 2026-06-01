@@ -586,22 +586,6 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
 
     if ((ircMsg.type !== 'message' && ircMsg.type !== 'notice') || !ircMsg.nick || !ircMsg.text) return;
 
-    // Detect MechaSqueak nick-change notices and update ircNick immediately,
-    // before the API has a chance to reflect the new value.
-    // Format A: "Caution: Client of case #7 (old name) has changed IRC nick to newNick"
-    // Format B: "CAUTION: The latest signal for case #1 has new information: IRC Nick: OldNick -> NewNick"
-    //   (Format B fires when a client quits and rejoins under a different nick)
-    const nickChangeMatch =
-      ircMsg.text.match(/Client of case #(\d+) .+ has changed IRC nick to (\S+)/i) ||
-      ircMsg.text.match(/latest signal for case #(\d+) has new information: IRC Nick: \S+ -> (\S+)/i);
-    if (nickChangeMatch && ircMsg.nick?.toLowerCase().includes('mechasqueak')) {
-      const caseNum = parseInt(nickChangeMatch[1], 10);
-      const newNick = nickChangeMatch[2];
-      const caseId = `case-${caseNum.toString().padStart(2, '0')}`;
-      // Mark client as in-channel: format B means they just rejoined under the new nick
-      setCases((prev) => prev.map((c) => c.id === caseId ? { ...c, ircNick: newNick, clientInChannel: true } : c));
-    }
-
     const isNotice = ircMsg.type === 'notice';
 
     setCases((prev) => {
@@ -729,22 +713,7 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
           setUnreadCases((prev) => new Set(prev).add(c.id));
         }
 
-        // Extract IRC nickname from "Incoming Client" messages if we don't have one yet
-        const updatedIrcNick = c.ircNick || (() => {
-          const nickMatch = displayText.match(/IRC Nickname:\s*(\S+)/i);
-          return nickMatch ? nickMatch[1] : undefined;
-        })();
-
         let updatedRatIrcNicks = c.ratIrcNicks;
-
-        // Update client channel presence from live MechaSqueak messages
-        // MechaSqueak formats: "Caution: Client of case #N (name) has left!"
-        //                      "PC case #N (name) in "..." (...) has rejoined!"
-        let updatedClientInChannel = c.clientInChannel;
-        if (ircMsg.nick?.toLowerCase().includes('mechasqueak')) {
-          if (/has left[!.]?\s*$/i.test(displayText)) updatedClientInChannel = false;
-          else if (/has rejoined[!.]?\s*$/i.test(displayText)) updatedClientInChannel = true;
-        }
 
         // PRIMARY: learn nick → CMDR from MechaSqueak's response to !gofr/!go
         // Response format (any language): ... "CMDR Name 1" "CMDR Name 2"
@@ -829,12 +798,10 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
 
         return {
           ...c,
-          ircNick: updatedIrcNick,
           ratIrcNicks: updatedRatIrcNicks,
           scDistance: updatedScDistance,
           jumpCalls: updatedJumpCalls,
           ratProgress: updatedRatProgress,
-          clientInChannel: updatedClientInChannel,
           messages: [...c.messages, newMessage],
         };
       });
