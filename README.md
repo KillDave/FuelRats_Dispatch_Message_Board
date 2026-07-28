@@ -88,6 +88,16 @@ Click **Login** and you'll be redirected to [fuelrats.com](https://fuelrats.com)
 
 ## Changelog
 
+### v1.1.2
+- Langbly translation settings page and service, alongside DeepL
+- `#debrief` IRC channel messages now surface in Rat Mode
+- Added Rat Mode with TAB-completion and per-account rat tracking
+- Perl HexChat bridge script (replaces the old Python HexChat bridge)
+- Fixed nick-change detection on client reconnect and channel-membership checks
+- Fixed `!gofr -a`/`!go -a` re-announce flag being misread as a rat nick
+- Fixed stale `scDistanceLs` reference in CaseWindow
+- Added SC (supercruise) timer, scoopable improvements, disconnect icon, and configurable bridge port
+
 ### v1.1.1
 - Station badge now shows a hover popup with S/M and Large pad stations — click either to copy to clipboard
 - Station popup repositions automatically if it would clip the screen edge
