@@ -207,9 +207,19 @@ export function RatCaseDetail({ caseData, isClosed = false, onClose }: RatCaseDe
               {!isCollapsed('chat') && (
                 <div className="bg-slate-900/60 border border-slate-700/60 rounded-lg p-3 space-y-1.5">
                   {recentMessages.map(msg => (
-                    <div key={msg.id} className="text-sm flex gap-2">
-                      <span className="text-slate-500 flex-shrink-0">&lt;{msg.sender}&gt;</span>
-                      <span className="text-slate-300">{msg.text}</span>
+                    <div key={msg.id} className="text-sm">
+                      <div className="flex gap-2">
+                        <span className="text-slate-500 flex-shrink-0">&lt;{msg.sender}&gt;</span>
+                        <span className="text-slate-300">{msg.text}</span>
+                      </div>
+                      {/* Translations are attached to the message by whichever mode
+                          fetched them, so showing them here costs nothing -- without
+                          this a rat sees only the original text for a case the
+                          dispatcher has already had translated. Styled to match
+                          CaseWindow so the same message reads the same in both modes. */}
+                      {msg.translation && (
+                        <p className="text-cyan-300 italic break-words mt-0.5 ml-1">⟫ {msg.translation}</p>
+                      )}
                     </div>
                   ))}
                 </div>
