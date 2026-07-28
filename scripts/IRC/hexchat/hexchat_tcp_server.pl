@@ -135,7 +135,9 @@ sub _poll {
     while (@cmd_queue) {
         my $cmd = shift @cmd_queue;
         Xchat::print("*** Bridge -> IRC: $cmd");
-        # Xchat::command($cmd);  # uncomment to execute received commands
+        # To allow the Dispatch Board to send to IRC (including #debrief),
+        # uncomment the line below:
+        # Xchat::command($cmd);
     }
 
     return 1;  # keep timer running

@@ -43,8 +43,8 @@ on *:SOCKREAD:ircbridge*: {
     ; Log the command
     echo -s *** Bridge → IRC: %data
     
-    ; Execute the command
-    ; === TESTING MODE: Command execution disabled ===
+    ; To allow the Dispatch Board to send to IRC (including #debrief),
+    ; uncomment the line below:
     ; %data
   }
 }

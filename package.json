@@ -1,13 +1,13 @@
 {
   "name": "@figma/my-make-file",
   "private": true,
-  "version": "1.1.1",
+  "version": "1.1.2",
   "type": "module",
   "scripts": {
     "dev": "vite --open",
     "build": "vite build",
     "bridge": "python scripts/python/node.py",
-    "bridge:build": "pyinstaller --onefile --name bridge --distpath bridge-dist --workpath bridge-dist/build --specpath bridge-dist scripts/python/node.py",
+    "bridge:build": "\"C:\\Users\\DaveP\\AppData\\Local\\Programs\\Python\\Python312\\python.exe\" -m PyInstaller --onefile --name bridge --distpath bridge-dist --workpath bridge-dist/build --specpath bridge-dist scripts/python/node.py",
     "build:all": "npm run build && npm run bridge:build",
     "build:release": "powershell -ExecutionPolicy Bypass -File scripts/release.ps1"
   },

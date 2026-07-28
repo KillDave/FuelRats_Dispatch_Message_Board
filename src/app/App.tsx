@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { DispatchBoard } from '@/app/components/DispatchBoard';
 import { LoginScreen } from '@/app/components/LoginScreen';
 import { DeepLTestPage } from '@/app/components/DeepLTestPage';
+import { LangblyTestPage } from '@/app/components/LangblyTestPage';
 import { authService } from '@/app/services/authService';
 
 function handleOAuthCallback(): boolean {
@@ -38,6 +39,14 @@ export default function App() {
     return (
       <div className="h-[100dvh] flex flex-col">
         <DeepLTestPage onBack={() => { window.location.hash = ''; setHash(''); }} />
+      </div>
+    );
+  }
+
+  if (hash === '#langbly') {
+    return (
+      <div className="h-[100dvh] flex flex-col">
+        <LangblyTestPage onBack={() => { window.location.hash = ''; setHash(''); }} />
       </div>
     );
   }

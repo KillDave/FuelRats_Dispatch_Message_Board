@@ -79,6 +79,45 @@ def _deepl_forward(path, headers, body):
         print(f"[DeepL] Failed: {e}")
         return 502, 'text/plain', str(e).encode()
 
+
+def _langbly_forward(path, headers, body, method='POST'):
+    target = 'https://api.langbly.com' + path[len('/langbly-proxy'):]
+
+    if body:
+        try:
+            parsed = json.loads(body)
+            text = parsed.get('q', parsed.get('limitDollars', parsed.get('limitCents', '')))
+            print(f"[Langbly] {method} {path} — {text}")
+        except Exception:
+            pass
+
+    req = urllib.request.Request(
+        target,
+        data=body,
+        headers={
+            'Authorization': headers.get('authorization', headers.get('Authorization', '')),
+            'Content-Type': 'application/json',
+        },
+        method=method,
+    )
+
+    try:
+        with urllib.request.urlopen(req) as resp:
+            data = resp.read()
+            try:
+                result = json.loads(data).get('data', {}).get('translations', [{}])[0].get('translatedText', '')
+                print(f"[Langbly] Response: {result}")
+            except Exception:
+                pass
+            return resp.status, resp.headers.get('Content-Type', 'application/json'), data
+    except urllib.error.HTTPError as e:
+        data = e.read()
+        print(f"[Langbly] Error {e.code}: {data.decode('utf-8', errors='replace')}")
+        return e.code, 'application/json', data
+    except Exception as e:
+        print(f"[Langbly] Failed: {e}")
+        return 502, 'text/plain', str(e).encode()
+
 PROXY_PORT = 8081
 CORS = (
     'Access-Control-Allow-Origin: *\r\n'
@@ -120,9 +159,14 @@ async def handle_deepl_http(reader, writer):
                 break
             body += chunk
 
-        status, content_type, resp_body = await asyncio.get_event_loop().run_in_executor(
-            None, _deepl_forward, path, headers, body if body else None
-        )
+        if path.startswith('/langbly-proxy/'):
+            status, content_type, resp_body = await asyncio.get_event_loop().run_in_executor(
+                None, _langbly_forward, path, headers, body if body else None, method
+            )
+        else:
+            status, content_type, resp_body = await asyncio.get_event_loop().run_in_executor(
+                None, _deepl_forward, path, headers, body if body else None
+            )
 
         response = (
             f'HTTP/1.1 {status} OK\r\n'
@@ -133,7 +177,7 @@ async def handle_deepl_http(reader, writer):
         writer.write(response)
         await writer.drain()
     except Exception as e:
-        print(f"[DeepL] HTTP error: {e}")
+        print(f"[Proxy] HTTP error: {e}")
     finally:
         try:
             writer.close()

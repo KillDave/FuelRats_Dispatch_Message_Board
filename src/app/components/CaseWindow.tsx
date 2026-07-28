@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import disconnectIcon from './image/Disconnect_Icon.png';
 import type { Case, CaseStatus } from './DispatchBoard';
 import { translateText, toDeepLTargetLang, getDeepLApiKey, setDeepLApiKey } from '../services/translationService';
+import { langblyTranslate, toLangblyTargetLang, getLangblyApiKey, setLangblyApiKey } from '../services/langblyService';
 import { Button } from '@/app/components/ui/button';
 import { Input } from '@/app/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/app/components/ui/popover';
@@ -128,6 +129,9 @@ export function CaseWindow({
   const [deeplApiKey, setDeeplApiKeyState] = useState(() => getDeepLApiKey());
   const [deeplUsage, setDeeplUsage] = useState<{ count: number; limit: number } | null>(null);
   const [showApiKeyInput, setShowApiKeyInput] = useState(false);
+  const [langblyEnabled, setLangblyEnabled] = useState(false);
+  const [langblyApiKey, setLangblyApiKeyState] = useState(() => getLangblyApiKey());
+  const [showLangblyKeyInput, setShowLangblyKeyInput] = useState(false);
   const [rootPopoverOpen, setRootPopoverOpen] = useState<Record<number, boolean>>({});
   const [subPopoverOpen, setSubPopoverOpen] = useState<Record<string, boolean>>({});
   const [openRatMenuId, setOpenRatMenuId] = useState<string | null>(null);
@@ -140,7 +144,7 @@ export function CaseWindow({
   const scoopableHideTimer = useRef<number | null>(null);
   const scoopablePopupRef = useRef<HTMLDivElement>(null);
   const [scoShip, setScoShip] = useState<ScoShipKey>('cobra');
-  const [gravityMode, setGravityMode] = useState(false);
+  const [gravityMode, setGravityMode] = useState<'off' | 'grav' | 'nosco'>('off');
   const [shipHover, setShipHover] = useState(false);
   const [shipPopupOffset, setShipPopupOffset] = useState(0);
   const shipHideTimer = useRef<number | null>(null);
@@ -225,6 +229,28 @@ export function CaseWindow({
       if (result) onSetTranslation(caseData.id, last.id, result);
     });
   }, [caseData.messages, deeplEnabled]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-translate new incoming messages via Langbly when enabled
+  useEffect(() => {
+    if (!langblyEnabled) return;
+    const messages = caseData.messages;
+    if (messages.length === 0) return;
+    const last = messages[messages.length - 1];
+    if (last.isSystem || last.isNotice || last.translation) return;
+    if (last.sender.toLowerCase().includes('[bot]')) return;
+    const senderLower = last.sender.toLowerCase();
+    const isRat = caseData.assignedRats.some((rat) => {
+      const nick = caseData.ratIrcNicks?.[rat] ?? rat;
+      return nick.toLowerCase() === senderLower || rat.toLowerCase() === senderLower;
+    });
+    if (isRat) return;
+    if (/\b#\d{1,2}\b/.test(last.text)) return;
+    const lang = caseData.language?.toLowerCase() ?? '';
+    if (lang.startsWith('en')) return;
+    langblyTranslate(last.text, 'en').then((result) => {
+      if (result) onSetTranslation(caseData.id, last.id, result);
+    });
+  }, [caseData.messages, langblyEnabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Trigger flicker effect based on case status and messages
   useEffect(() => {
@@ -344,6 +370,19 @@ export function CaseWindow({
       } else {
         const targetLang = toDeepLTargetLang(caseData.language);
         const translated = await translateText(messageInput, targetLang);
+        if (translated) finalMessage = translated;
+      }
+    } else if (langblyEnabled && caseData.language && !caseData.language.toLowerCase().startsWith('en')) {
+      if (isCommand) {
+        const parts = messageInput.trim().split(/\s+/);
+        const command = parts[0].toLowerCase();
+        const args = parts.slice(1).join(' ');
+        if (trCommands.has(command)) {
+          finalMessage = `${command}-a${args ? ' ' + args : ''}`;
+        }
+      } else {
+        const targetLang = toLangblyTargetLang(caseData.language);
+        const translated = await langblyTranslate(messageInput, targetLang);
         if (translated) finalMessage = translated;
       }
     }
@@ -560,6 +599,19 @@ export function CaseWindow({
       } else {
         const targetLang = toDeepLTargetLang(caseData.language);
         const translated = await translateText(message, targetLang);
+        if (translated) finalMessage = translated;
+      }
+    } else if (langblyEnabled && caseData.language && !caseData.language.toLowerCase().startsWith('en')) {
+      if (isCommand) {
+        const parts = message.split(' ');
+        const command = parts[0];
+        const args = parts.slice(1).join(' ');
+        if (trCommands.has(command)) {
+          finalMessage = `${command}-a${args ? ' ' + args : ''}`;
+        }
+      } else {
+        const targetLang = toLangblyTargetLang(caseData.language);
+        const translated = await langblyTranslate(message, targetLang);
         if (translated) finalMessage = translated;
       }
     }
@@ -813,10 +865,10 @@ export function CaseWindow({
             const hasSco = caseData.platform.toLowerCase().includes('horizons') || caseData.platform.toLowerCase().includes('odyssey');
             const activeShip = SCO_SHIPS.find(s => s.key === scoShip)!;
             const scBaseSecs = caseData.scDistance !== undefined
-              ? distanceToSeconds(caseData.scDistance.ls, hasSco ? activeShip.speed : undefined)
+              ? distanceToSeconds(caseData.scDistance.ls, (hasSco && gravityMode !== 'nosco') ? activeShip.speed : undefined)
               : null;
             // Gravity multiplier: ~1.5× for planetary exclusion zone slowdown
-            const scTotalSecs = scBaseSecs !== null ? scBaseSecs * (gravityMode ? 1.5 : 1) : null;
+            const scTotalSecs = scBaseSecs !== null ? scBaseSecs * (gravityMode === 'grav' ? 1.5 : 1) : null;
             const scEtaSecs = scTotalSecs !== null && caseData.scDistance
               ? Math.max(0, Math.floor(scTotalSecs - (Date.now() - caseData.scDistance.timestamp.getTime()) / 1000))
               : null;
@@ -862,15 +914,15 @@ export function CaseWindow({
                   <div className="ml-auto flex-shrink-0 flex items-center gap-1.5">
                     {/* Gravity toggle */}
                     <button
-                      onClick={() => setGravityMode(g => !g)}
-                      title="Toggle gravity limitation (×1.5 for planetary approach)"
+                      onClick={() => setGravityMode(g => g === 'off' ? 'grav' : g === 'grav' ? 'nosco' : 'off')}
+                      title={gravityMode === 'grav' ? 'Gravity ×1.5 active' : gravityMode === 'nosco' ? 'No SCO — using sub-light speed' : 'Toggle gravity / SCO mode'}
                       className={`text-xs border rounded px-1.5 py-0.5 select-none transition-colors ${
-                        gravityMode
-                          ? 'border-amber-500/70 bg-amber-500/15 text-amber-400'
-                          : 'border-slate-600 bg-slate-700/30 text-slate-500 hover:text-slate-300'
+                        gravityMode === 'grav'  ? 'border-amber-500/70 bg-amber-500/15 text-amber-400' :
+                        gravityMode === 'nosco' ? 'border-blue-500/70 bg-blue-500/15 text-blue-400' :
+                                                  'border-slate-600 bg-slate-700/30 text-slate-500 hover:text-slate-300'
                       }`}
                     >
-                      ⚖ Grav
+                      {gravityMode === 'grav' ? '⚖ Grav' : gravityMode === 'nosco' ? '✕ SCO' : '⚖ Grav'}
                     </button>
 
                     {/* SC countdown chip */}
@@ -1065,7 +1117,7 @@ export function CaseWindow({
                             variant="outline"
                             size="sm"
                             className={`w-full text-xs h-8 bg-slate-900 border-slate-600 text-white hover:bg-slate-700 ${translateEnabled ? 'bg-orange-600/20 border-orange-500' : ''}`}
-                            onClick={() => { setTranslateEnabled(!translateEnabled); setDeeplEnabled(false); }}
+                            onClick={() => { setTranslateEnabled(!translateEnabled); setDeeplEnabled(false); setLangblyEnabled(false); }}
                           >
                             /tr {translateEnabled ? '(ON)' : '(OFF)'}
                           </Button>
@@ -1079,6 +1131,7 @@ export function CaseWindow({
                               } else {
                                 setDeeplEnabled(!deeplEnabled);
                                 setTranslateEnabled(false);
+                                setLangblyEnabled(false);
                               }
                             }}
                           >
@@ -1110,6 +1163,7 @@ export function CaseWindow({
                                     setShowApiKeyInput(false);
                                     setDeeplEnabled(true);
                                     setTranslateEnabled(false);
+                                    setLangblyEnabled(false);
                                   }
                                 }}
                               />
@@ -1122,6 +1176,57 @@ export function CaseWindow({
                                     setShowApiKeyInput(false);
                                     setDeeplEnabled(true);
                                     setTranslateEnabled(false);
+                                    setLangblyEnabled(false);
+                                  }
+                                }}
+                              >
+                                Save
+                              </Button>
+                            </div>
+                          )}
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className={`w-full text-xs h-8 bg-slate-900 border-slate-600 text-white hover:bg-slate-700 ${langblyEnabled ? 'bg-orange-600/20 border-orange-400' : ''}`}
+                            onClick={() => {
+                              if (!getLangblyApiKey()) {
+                                setShowLangblyKeyInput(true);
+                              } else {
+                                setLangblyEnabled(!langblyEnabled);
+                                setTranslateEnabled(false);
+                                setDeeplEnabled(false);
+                              }
+                            }}
+                          >
+                            Langbly {langblyEnabled ? '(ON)' : '(OFF)'}
+                          </Button>
+                          {showLangblyKeyInput && (
+                            <div className="flex gap-1 mt-1">
+                              <Input
+                                className="h-7 text-xs bg-slate-900 border-slate-600 text-white"
+                                placeholder="Langbly API key"
+                                value={langblyApiKey}
+                                onChange={(e) => setLangblyApiKeyState(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter' && langblyApiKey.trim()) {
+                                    setLangblyApiKey(langblyApiKey.trim());
+                                    setShowLangblyKeyInput(false);
+                                    setLangblyEnabled(true);
+                                    setTranslateEnabled(false);
+                                    setDeeplEnabled(false);
+                                  }
+                                }}
+                              />
+                              <Button
+                                size="sm"
+                                className="h-7 px-2 text-xs bg-orange-600 hover:bg-orange-700 text-white shrink-0"
+                                onClick={() => {
+                                  if (langblyApiKey.trim()) {
+                                    setLangblyApiKey(langblyApiKey.trim());
+                                    setShowLangblyKeyInput(false);
+                                    setLangblyEnabled(true);
+                                    setTranslateEnabled(false);
+                                    setDeeplEnabled(false);
                                   }
                                 }}
                               >

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import type { Case } from './DispatchBoard';
+import type { AccountCardDist } from '../hooks/useRatAccounts';
 
 const borderByStatus: Record<string, string> = {
   'code-red': 'border-l-red-500',
@@ -24,9 +25,10 @@ function getPlatformShort(platform: string): string {
 export interface RatCaseCardProps {
   caseData: Case;
   onSelect: () => void;
+  accountDistances?: AccountCardDist[];
 }
 
-export function RatCaseCard({ caseData, onSelect }: RatCaseCardProps) {
+export function RatCaseCard({ caseData, onSelect, accountDistances = [] }: RatCaseCardProps) {
   const [elapsed, setElapsed] = useState(0);
 
   useEffect(() => {
@@ -45,6 +47,7 @@ export function RatCaseCard({ caseData, onSelect }: RatCaseCardProps) {
       className={`w-full bg-slate-900/80 border border-slate-700/60 border-l-4 rounded-lg overflow-hidden text-left hover:bg-slate-800/60 transition-colors ${borderByStatus[caseData.status] ?? 'border-l-slate-600'}`}
       onClick={onSelect}
     >
+      {/* Main row */}
       <div className="flex items-center gap-3 px-4 py-3">
         <span className="text-orange-400 font-bold text-lg w-8 flex-shrink-0">
           {caseData.id.split('-')[1]}
@@ -77,6 +80,24 @@ export function RatCaseCard({ caseData, onSelect }: RatCaseCardProps) {
           <span className="font-mono">{elapsedStr}</span>
         </div>
       </div>
+
+      {/* Account distances */}
+      {accountDistances.length > 0 && (
+        <div className="border-t border-slate-700/40 px-4 py-2 space-y-1">
+          {accountDistances.map(a => (
+            <div key={a.id} className="flex items-center gap-2 text-xs">
+              <span className="text-slate-400 w-36 flex-shrink-0 truncate">{a.cmdr}</span>
+              <span className="text-slate-600 flex-1 truncate">{a.system || '—'}</span>
+              <span className="font-mono flex-shrink-0 w-24 text-right">
+                {a.status === 'loading'   ? <span className="text-slate-600 animate-pulse">···</span>
+                : a.status === 'no-system' ? <span className="text-slate-600">—</span>
+                : a.status === 'error'     ? <span className="text-red-400/60">unknown</span>
+                : <span className="text-orange-300">{a.distance!.toFixed(1)} ly</span>}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
     </button>
   );
 }

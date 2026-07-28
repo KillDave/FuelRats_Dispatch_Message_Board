@@ -108,10 +108,10 @@ export function DeepLTestPage({ onBack }: { onBack: () => void }) {
     <div className="min-h-screen bg-slate-950 text-white">
       <div className="p-6 flex flex-col gap-6">
       <div className="flex items-center gap-4">
-        <Button variant="outline" size="sm" onClick={onBack} className="border-slate-600 text-slate-300">
+        <Button variant="outline" size="sm" onClick={onBack} className="border-slate-400 text-white bg-slate-700 hover:bg-slate-600 hover:border-slate-300">
           ← Back
         </Button>
-        <h1 className="text-xl font-bold text-orange-400">DeepL API Test</h1>
+        <h1 className="text-xl font-bold text-orange-400">DeepL Settings</h1>
       </div>
 
       {/* API Key */}
@@ -145,7 +145,7 @@ export function DeepLTestPage({ onBack }: { onBack: () => void }) {
         <div className="bg-slate-900 border border-slate-700 rounded-lg p-4 flex flex-col gap-3">
           <div className="flex items-center justify-between">
             <h2 className="font-semibold text-slate-200">Usage</h2>
-            <Button size="sm" variant="outline" onClick={handleCheckUsage} disabled={usageLoading} className="border-slate-600 text-slate-300">
+            <Button size="sm" variant="outline" onClick={handleCheckUsage} disabled={usageLoading} className="border-slate-400 text-white bg-slate-700 hover:bg-slate-600 hover:border-slate-300 disabled:opacity-40">
               {usageLoading ? 'Checking...' : 'Check Usage'}
             </Button>
           </div>

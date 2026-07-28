@@ -3,7 +3,7 @@ import { CaseWindow } from './CaseWindow';
 import { RatBoard } from './RatBoard';
 import { MessageEditorPage } from './MessageEditorPage';
 import { Button } from '@/app/components/ui/button';
-import { Eye, EyeOff, Sidebar, User, MapPin, AlertTriangle, Clock, LogOut, Plus, Shield, ChevronDown, MessageSquare } from 'lucide-react';
+import { Eye, EyeOff, Sidebar, User, MapPin, AlertTriangle, Clock, LogOut, Plus, Shield, ChevronDown, MessageSquare, Settings } from 'lucide-react';
 import { fuelRatsApi } from '../services/fuelRatsApi';
 import { ircWebSocket, IRCMessage, IRCConnectionStatus } from '../services/ircWebSocket';
 import { IRCConnectionPanel } from './IRCConnectionPanel';
@@ -190,6 +190,21 @@ function HeaderMenu({
             <Plus className="w-3 h-3" />
             Add Case
           </button>
+          <div className="my-1 border-t border-slate-700/60" />
+          <button
+            onClick={() => { window.location.hash = '#deepl'; setOpen(false); }}
+            className="flex items-center gap-2 w-full text-left px-3 py-1.5 rounded text-xs text-slate-300 hover:bg-slate-700/50 transition-colors"
+          >
+            <Settings className="w-3 h-3" />
+            DeepL Settings
+          </button>
+          <button
+            onClick={() => { window.location.hash = '#langbly'; setOpen(false); }}
+            className="flex items-center gap-2 w-full text-left px-3 py-1.5 rounded text-xs text-slate-300 hover:bg-slate-700/50 transition-colors"
+          >
+            <Settings className="w-3 h-3" />
+            Langbly Settings
+          </button>
           {onLogout && (
             <>
               <div className="my-1 border-t border-slate-700/60" />
@@ -234,6 +249,8 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
   const [ircStatus, setIrcStatus] = useState<IRCConnectionStatus>('disconnected');
   const [ircError, setIrcError] = useState<string | undefined>();
   const [ircChannel, setIrcChannel] = useState('#fuelrats'); // Default IRC channel
+
+  const [debriefMessages, setDebriefMessages] = useState<Message[]>([]);
 
   const [showAddCase, setShowAddCase] = useState(false);
   const [addCaseForm, setAddCaseForm] = useState({
@@ -584,6 +601,17 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
   const handleIRCMessage = (ircMsg: IRCMessage) => {
     if (ircMsg.type === 'system') return;
 
+    if (ircMsg.channel === '#debrief' && ircMsg.nick && ircMsg.text) {
+      setDebriefMessages(prev => [...prev, {
+        id: `debrief-${Date.now()}-${Math.random()}`,
+        sender: ircMsg.nick!,
+        text: ircMsg.text,
+        timestamp: ircMsg.timestamp,
+        isIRC: true,
+      }]);
+      return;
+    }
+
     if ((ircMsg.type !== 'message' && ircMsg.type !== 'notice') || !ircMsg.nick || !ircMsg.text) return;
 
     const isNotice = ircMsg.type === 'notice';
@@ -840,10 +868,13 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
 
       // Track rat nicks used in !gofr/!go commands (including -a translated variants)
       // Format: !gofr[-a] <caseNumber> <nick1> [nick2 ...]
-      const ratCmdMatch = text.match(/^!(?:gofr|go)-?a?\s+\d+\s+(.+)/i);
+      const ratCmdMatch = text.match(/^!(?:gofr|go)-?a?\s+\d+(?:\s+(.+))?/i);
       if (ratCmdMatch) {
-        const nicks = ratCmdMatch[1].trim().split(/\s+/);
-        lastRatCommandRef.current.set(caseId, { nicks, time: Date.now() });
+        // "-a" alone is the re-announce flag (no new nicks given), not a rat nick
+        const nicks = (ratCmdMatch[1] ?? '').trim().split(/\s+/).filter((n) => n && n.toLowerCase() !== '-a');
+        if (nicks.length > 0) {
+          lastRatCommandRef.current.set(caseId, { nicks, time: Date.now() });
+        }
       }
 
       // Add the message to this case window immediately so it appears right away
@@ -1014,7 +1045,7 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
 
       {/* Main Content Area */}
       {view === 'rat' ? (
-        <RatBoard cases={cases} />
+        <RatBoard cases={cases} debriefMessages={debriefMessages} />
       ) : (
       <div className="flex-1 flex min-h-0 relative z-10">
         {/* Sidebar */}
