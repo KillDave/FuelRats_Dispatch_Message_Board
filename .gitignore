@@ -67,3 +67,6 @@ ERROR_SUMMARY.txt
 DIAGNOSE_INVALID_HTTP.md
 README_ERROR_FIX.md
 TROUBLESHOOTING_EOFERROR.md
+
+# Local ship build exports
+casp.txt

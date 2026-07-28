@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { CaseWindow } from './CaseWindow';
 import { RatBoard } from './RatBoard';
 import { MessageEditorPage } from './MessageEditorPage';
+import { CopyableSystem } from './CopyableSystem';
 import { Button } from '@/app/components/ui/button';
 import { Eye, EyeOff, Sidebar, User, MapPin, AlertTriangle, Clock, LogOut, Plus, Shield, ChevronDown, MessageSquare, Settings } from 'lucide-react';
 import { fuelRatsApi } from '../services/fuelRatsApi';
@@ -1103,7 +1104,7 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
                               }}
                             />
                           </span>
-                          <span className="truncate">{caseData.system}</span>
+                          <CopyableSystem system={caseData.system} className="truncate" />
                         </div>
                         <div className={`flex items-center gap-2 text-xs mb-1 ${isVisible ? 'text-slate-400' : 'text-slate-600'}`}>
                           <Clock className="w-3 h-3 flex-shrink-0" />

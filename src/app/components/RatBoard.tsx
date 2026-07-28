@@ -1,11 +1,16 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
+import { Zap } from 'lucide-react';
 import type { Case, Message } from './DispatchBoard';
 import { RatCaseCard } from './RatCaseCard';
 import { RatCaseDetail } from './RatCaseDetail';
-import { useRatAccounts, type RatAccount, type AccountCardDist } from '../hooks/useRatAccounts';
+import { useRatAccounts, type RatAccount, type AccountCardDist, type ShipSlot } from '../hooks/useRatAccounts';
 import { ircWebSocket } from '../services/ircWebSocket';
 import { translateText, toDeepLTargetLang } from '../services/translationService';
 import { langblyTranslate, toLangblyTargetLang } from '../services/langblyService';
+import {
+  parseEdsyBuild, verifyBuild, jumpRange, plotJumps, NEUTRON_THRESHOLD_LY,
+  type ShipParams,
+} from '../services/spanshService';
 
 // Common DeepL/Langbly language codes shown in the debrief target-language picker.
 // Swap translateText() in translationService.ts to switch providers.
@@ -38,6 +43,8 @@ function loadEnabledPlatforms(): Set<string> {
 interface EdsmCoordSystem {
   name: string;
   coords?: { x: number; y: number; z: number };
+  /** Requested via &showId=1. Spansh's plotter identifies systems by id64, not name. */
+  id64?: number;
 }
 
 // ---- Accounts panel ------------------------------------------------
@@ -45,11 +52,137 @@ interface EdsmCoordSystem {
 interface AccountRowProps {
   account: RatAccount;
   onUpdate: (id: string, cmdr: string, system: string) => void;
+  onSetShip: (id: string, slot: ShipSlot, ship: ShipParams | undefined) => void;
+  onSetSupercharged: (id: string, on: boolean) => void;
   onRemove: (id: string) => void;
 }
 
-function AccountRow({ account, onUpdate, onRemove }: AccountRowProps) {
+const SLOT_LABEL: Record<ShipSlot, string> = {
+  short: `under ${NEUTRON_THRESHOLD_LY} ly, no neutron boosting`,
+  long:  `${NEUTRON_THRESHOLD_LY} ly and above, neutron boosted`,
+};
+
+/** Paste box for an EDSY export, shown inline under the account row. */
+function ShipEditor({ account, slot, onSetShip, onClose }: {
+  account: RatAccount;
+  slot: ShipSlot;
+  onSetShip: (id: string, slot: ShipSlot, ship: ShipParams | undefined) => void;
+  onClose: () => void;
+}) {
+  const existing = account.ships?.[slot];
+  // Prefilled from what is already saved, so "replace" starts from the current
+  // build rather than a blank box -- usually only the cargo or a module changed.
+  const [raw, setRaw]     = useState(existing?.sourceJson ?? '');
+  const [error, setError] = useState<string | null>(null);
+  const [mult, setMult]   = useState(existing?.superchargeMultiplier?.toString() ?? '');
+  const [cargo, setCargo] = useState(existing ? String(existing.cargo) : '');
+  const taRef = useRef<HTMLTextAreaElement>(null);
+
+  // Mount only. Selecting the prefilled build means pasting a new one replaces
+  // it instead of landing in the middle of the old JSON; doing this on every
+  // render would re-select on each keystroke and make the box unusable.
+  useEffect(() => {
+    if (existing?.sourceJson) taRef.current?.select();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const save = () => {
+    try {
+      const ship = parseEdsyBuild(raw);
+      const check = verifyBuild(ship);
+      // EDSY publishes its own max range in the same export. If ours disagrees
+      // the estimates would be quietly wrong, so refuse rather than guess.
+      if (!check.ok) {
+        setError(
+          `Parsed range ${check.derived.toFixed(2)} ly but EDSY says ${check.reported?.toFixed(2)} ly. ` +
+          `Not saving — the FSD table may be out of date.`,
+        );
+        return;
+      }
+      const override = mult.trim() ? Number(mult) : undefined;
+      if (override !== undefined && (!Number.isFinite(override) || override <= 0)) {
+        setError('Supercharge multiplier must be a positive number.');
+        return;
+      }
+      // Blank means "whatever the build holds"; anything else is what the rat
+      // actually flies with, which is usually well under capacity.
+      const carried = cargo.trim() ? Number(cargo) : ship.cargoCapacity;
+      if (!Number.isFinite(carried) || carried < 0) {
+        setError('Cargo must be zero or more.');
+        return;
+      }
+      if (carried > ship.cargoCapacity) {
+        setError(`That build only holds ${ship.cargoCapacity}t.`);
+        return;
+      }
+      onSetShip(account.id, slot, {
+        ...ship,
+        cargo: carried,
+        superchargeMultiplier: override ?? ship.superchargeMultiplier,
+      });
+      onClose();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not read that build.');
+    }
+  };
+
+  return (
+    <div className="py-1 pl-2 space-y-1">
+      <p className="text-[11px] text-slate-500">
+        Ship for <span className="text-slate-400">{SLOT_LABEL[slot]}</span>
+      </p>
+      <textarea
+        value={raw}
+        onChange={e => { setRaw(e.target.value); setError(null); }}
+        onKeyDown={e => { if (e.key === 'Escape') onClose(); }}
+        placeholder='Paste the EDSY export here (Export → Journal), e.g. [{"header":…,"data":{"event":"Loadout",…}}]'
+        autoFocus
+        ref={taRef}
+        rows={3}
+        className="w-full bg-slate-800 border border-slate-600 focus:border-orange-500 outline-none rounded px-2 py-1 text-[11px] font-mono text-white placeholder-slate-600 resize-y"
+      />
+      <label className="flex items-center gap-2 text-[11px] text-slate-500">
+        Cargo carried
+        <input
+          value={cargo}
+          onChange={e => setCargo(e.target.value)}
+          placeholder={existing ? String(existing.cargoCapacity) : 'max'}
+          inputMode="numeric"
+          className="w-16 bg-slate-800 border border-slate-600 focus:border-orange-500 outline-none rounded px-1 py-0.5 text-[11px] text-white placeholder-slate-600"
+        />
+        <span className="text-slate-600">
+          tonnes{existing ? ` — build holds ${existing.cargoCapacity}t` : ', blank = the build\'s capacity'}
+        </span>
+      </label>
+      {slot === 'long' && (
+        <label className="flex items-center gap-2 text-[11px] text-slate-500">
+          Neutron multiplier
+          <input
+            value={mult}
+            onChange={e => setMult(e.target.value)}
+            placeholder="auto"
+            className="w-16 bg-slate-800 border border-slate-600 focus:border-orange-500 outline-none rounded px-1 py-0.5 text-[11px] text-white placeholder-slate-600"
+          />
+          <span className="text-slate-600">blank = detect from the drive</span>
+        </label>
+      )}
+      {error && <p className="text-[11px] text-red-400 leading-snug">{error}</p>}
+      <div className="flex items-center gap-2">
+        <button onClick={save} className="text-xs text-green-400 hover:text-green-300">Save ship</button>
+        <button onClick={onClose} className="text-xs text-slate-500 hover:text-slate-300">Cancel</button>
+        {existing && (
+          <button
+            onClick={() => { onSetShip(account.id, slot, undefined); onClose(); }}
+            className="text-xs text-slate-600 hover:text-red-400 ml-auto"
+          >Remove</button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AccountRow({ account, onUpdate, onSetShip, onSetSupercharged, onRemove }: AccountRowProps) {
   const [editing, setEditing] = useState(false);
+  const [shipSlot, setShipSlot] = useState<ShipSlot | null>(null);
   const [cmdr, setCmdr]     = useState(account.cmdr);
   const [system, setSystem] = useState(account.system);
 
@@ -90,9 +223,54 @@ function AccountRow({ account, onUpdate, onRemove }: AccountRowProps) {
   }
 
   return (
+    <>
     <div className="flex items-center gap-2 group py-1">
       <span className="text-xs text-slate-300 w-36 flex-shrink-0 truncate">{account.cmdr}</span>
       <span className="text-xs text-slate-500 flex-1 truncate">{account.system || <span className="text-slate-700">no system set</span>}</span>
+      {/* Zap rather than a ⚡ emoji: emoji render as a colour glyph and ignore
+          text-* classes, so the on/off states looked identical. The padding is
+          deliberate too -- an 11px glyph with no padding is a miserable target. */}
+      <button
+        type="button"
+        onClick={() => onSetSupercharged(account.id, !account.startSupercharged)}
+        aria-pressed={!!account.startSupercharged}
+        title={
+          account.startSupercharged
+            ? 'Sitting supercharged — the first jump of a route gets the neutron boost. Click to turn off.'
+            : 'Not supercharged. Turn on if parked on a charged neutron star (e.g. Jackson\'s Lighthouse).'
+        }
+        className={`flex-shrink-0 rounded px-1 py-0.5 transition-colors ${
+          account.startSupercharged
+            ? 'text-sky-300 bg-sky-500/15 hover:bg-sky-500/25'
+            : 'text-slate-600 hover:text-sky-300 hover:bg-slate-700/50'
+        }`}
+      >
+        <Zap className="w-3.5 h-3.5" fill={account.startSupercharged ? 'currentColor' : 'none'} />
+      </button>
+      {(['short', 'long'] as ShipSlot[]).map(slot => {
+        const ship = account.ships?.[slot];
+        return (
+          <button
+            key={slot}
+            onClick={() => setShipSlot(s => (s === slot ? null : slot))}
+            title={
+              ship
+                ? `${slot === 'short' ? 'Short' : 'Long'} range: ${ship.shipName} — ` +
+                  `${jumpRange(ship).toFixed(1)} ly with ${ship.cargo}/${ship.cargoCapacity}t cargo` +
+                  (slot === 'long' && ship.superchargeMultiplier
+                    ? `, ${ship.superchargeMultiplier}x neutron`
+                    : '') +
+                  '. Click to replace.'
+                : `Set the ship for ${SLOT_LABEL[slot]}`
+            }
+            className={`text-[11px] flex-shrink-0 font-mono ${
+              ship ? 'text-orange-400/80 hover:text-orange-300' : 'text-slate-700 hover:text-orange-400'
+            }`}
+          >
+            {slot === 'short' ? '<' : '≥'}1k:{ship ? `${jumpRange(ship).toFixed(0)}ly` : '—'}
+          </button>
+        );
+      })}
       <button
         onClick={() => setEditing(true)}
         title="Edit"
@@ -104,6 +282,15 @@ function AccountRow({ account, onUpdate, onRemove }: AccountRowProps) {
         className="text-slate-600 hover:text-red-400 text-xs px-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
       >✕</button>
     </div>
+    {shipSlot && (
+      <ShipEditor
+        account={account}
+        slot={shipSlot}
+        onSetShip={onSetShip}
+        onClose={() => setShipSlot(null)}
+      />
+    )}
+    </>
   );
 }
 
@@ -142,10 +329,12 @@ interface AccountsPanelProps {
   accounts: RatAccount[];
   onAdd:    (cmdr: string, system: string) => void;
   onUpdate: (id: string, cmdr: string, system: string) => void;
+  onSetShip: (id: string, slot: ShipSlot, ship: ShipParams | undefined) => void;
+  onSetSupercharged: (id: string, on: boolean) => void;
   onRemove: (id: string) => void;
 }
 
-function AccountsPanel({ accounts, onAdd, onUpdate, onRemove }: AccountsPanelProps) {
+function AccountsPanel({ accounts, onAdd, onUpdate, onSetShip, onSetSupercharged, onRemove }: AccountsPanelProps) {
   const [adding, setAdding] = useState(false);
 
   const handleAdd = (cmdr: string, system: string) => {
@@ -165,7 +354,7 @@ function AccountsPanel({ accounts, onAdd, onUpdate, onRemove }: AccountsPanelPro
       </div>
       <div className="px-4 pb-3 space-y-0.5">
         {accounts.map(a => (
-          <AccountRow key={a.id} account={a} onUpdate={onUpdate} onRemove={onRemove} />
+          <AccountRow key={a.id} account={a} onUpdate={onUpdate} onSetShip={onSetShip} onSetSupercharged={onSetSupercharged} onRemove={onRemove} />
         ))}
         {adding && <AddAccountRow onAdd={handleAdd} onCancel={() => setAdding(false)} />}
         {accounts.length === 0 && !adding && (
@@ -191,7 +380,12 @@ export function RatBoard({ cases, debriefMessages }: RatBoardProps) {
   const [selectedCaseId, setSelectedCaseId]     = useState<string | null>(null);
   const [isClosed, setIsClosed]                 = useState(false);
   const frozenCaseRef                           = useRef<Case | null>(null);
-  const { accounts, add, update, remove }       = useRatAccounts();
+  const { accounts, add, update, setShip, setSupercharged, remove } = useRatAccounts();
+  const [id64Map, setId64Map] = useState<Map<string, number>>(new Map());
+  const [jumpMap, setJumpMap] = useState<Record<string, {
+    jumps: number | null;
+    status: NonNullable<AccountCardDist['jumpStatus']>;
+  }>>({});
 
   const [showDebrief, setShowDebrief]     = useState(false);
   const [debriefInput, setDebriefInput]   = useState('');
@@ -223,6 +417,29 @@ export function RatBoard({ cases, debriefMessages }: RatBoardProps) {
     setTranslatingIds(prev => { const s = new Set(prev); s.delete(msgId); return s; });
     if (result) setDebriefTranslations(prev => ({ ...prev, [msgId]: result }));
   };
+
+  /**
+   * Auto-translate incoming debrief messages, matching what CaseWindow does for
+   * case chatter rather than making the rat click "T" on every line.
+   *
+   * Only the newest message is considered, and the dependency array is
+   * [debriefMessages] alone. That combination is what keeps it safe:
+   * translateText() returns null when the text is already English, so nothing is
+   * recorded for English lines. Depending on debriefTranslations or
+   * translatingIds as well would re-fire when those change, find the message
+   * still untranslated, and translate it forever. The trade-off is that a burst
+   * arriving in one render only translates its last line -- the manual "T"
+   * button backfills anything missed.
+   */
+  useEffect(() => {
+    if (debriefMessages.length === 0) return;
+    const last = debriefMessages[debriefMessages.length - 1];
+    if (!last?.id || !last.text) return;
+    if (last.isSystem || last.isNotice) return;
+    if (last.sender?.toLowerCase().includes('[bot]')) return;
+    if (debriefTranslations[last.id] || translatingIds.has(last.id)) return;
+    translateMessage(last.id, last.text);
+  }, [debriefMessages]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const translateAndSend = async () => {
     const text = debriefInput.trim();
@@ -315,10 +532,13 @@ export function RatBoard({ cases, debriefMessages }: RatBoardProps) {
     const params     = unique.map(s => `systemName[]=${encodeURIComponent(s)}`).join('&');
     const controller = new AbortController();
 
-    fetch(`https://www.edsm.net/api-v1/systems?${params}&showCoordinates=1`, { signal: controller.signal })
+    fetch(`https://www.edsm.net/api-v1/systems?${params}&showCoordinates=1&showId=1`, { signal: controller.signal })
       .then(r => r.json())
       .then((data: EdsmCoordSystem[]) => {
         const coordMap = new Map(data.map(s => [s.name.toLowerCase(), s.coords]));
+        setId64Map(new Map(
+          data.filter(s => s.id64 != null).map(s => [s.name.toLowerCase(), s.id64 as number]),
+        ));
         const next: typeof distMap = {};
         for (const c of visibleCases) {
           next[c.id] = {};
@@ -348,6 +568,50 @@ export function RatBoard({ cases, debriefMessages }: RatBoardProps) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [caseKey, accountKey]);
 
+  /**
+   * Plot a single case/account pair on demand.
+   *
+   * Not done automatically for every pair: each plot is a queued job on Spansh
+   * taking ~10s, so filling a whole cases x accounts matrix would mean dozens of
+   * jobs against a free third-party service every time a case appears. Results
+   * are cached in spanshService, so re-plotting the same pair is instant.
+   */
+  const requestJumps = async (caseId: string, accountId: string) => {
+    const key = `${caseId}:${accountId}`;
+    if (jumpMap[key]?.status === 'plotting') return;
+
+    const account = accounts.find(a => a.id === accountId);
+    const kase    = visibleCases.find(c => c.id === caseId);
+    const dist    = distMap[caseId]?.[accountId]?.distance;
+    if (!account || !kase || dist == null) return;
+
+    // Pick the build the rat would actually fly for a trip this long, falling
+    // back to whichever slot is filled if only one is set.
+    const slot: ShipSlot = dist >= NEUTRON_THRESHOLD_LY ? 'long' : 'short';
+    const ship = account.ships?.[slot] ?? account.ships?.[slot === 'long' ? 'short' : 'long'];
+    if (!ship) {
+      setJumpMap(m => ({ ...m, [key]: { jumps: null, status: 'no-ship' } }));
+      return;
+    }
+
+    const from = id64Map.get(account.system?.toLowerCase() ?? '');
+    const to   = id64Map.get(kase.system?.toLowerCase() ?? '');
+    if (from == null || to == null) {
+      setJumpMap(m => ({ ...m, [key]: { jumps: null, status: 'error' } }));
+      return;
+    }
+
+    setJumpMap(m => ({ ...m, [key]: { jumps: null, status: 'plotting' } }));
+    try {
+      const jumps = await plotJumps(from, to, dist, ship, {
+        startSupercharged: account.startSupercharged,
+      });
+      setJumpMap(m => ({ ...m, [key]: { jumps, status: 'done' } }));
+    } catch {
+      setJumpMap(m => ({ ...m, [key]: { jumps: null, status: 'error' } }));
+    }
+  };
+
   // Build AccountCardDist[] for a given caseId
   const buildDists = useMemo(() => (caseId: string): AccountCardDist[] =>
     accounts.map(a => ({
@@ -356,8 +620,10 @@ export function RatBoard({ cases, debriefMessages }: RatBoardProps) {
       system:   a.system,
       distance: distMap[caseId]?.[a.id]?.distance ?? null,
       status:   distMap[caseId]?.[a.id]?.status   ?? 'loading',
+      jumps:      jumpMap[`${caseId}:${a.id}`]?.jumps  ?? null,
+      jumpStatus: jumpMap[`${caseId}:${a.id}`]?.status ?? 'idle',
     })),
-  [accounts, distMap]);
+  [accounts, distMap, jumpMap]);
 
   const liveCase = selectedCaseId ? cases.find(c => c.id === selectedCaseId) ?? null : null;
 
@@ -542,6 +808,7 @@ export function RatBoard({ cases, debriefMessages }: RatBoardProps) {
                   key={c.id}
                   caseData={c}
                   accountDistances={buildDists(c.id)}
+                  onPlotJumps={accountId => requestJumps(c.id, accountId)}
                   onSelect={() => { frozenCaseRef.current = null; setIsClosed(false); setSelectedCaseId(c.id); }}
                 />
               ))}
@@ -554,6 +821,8 @@ export function RatBoard({ cases, debriefMessages }: RatBoardProps) {
             accounts={accounts}
             onAdd={add}
             onUpdate={update}
+            onSetShip={setShip}
+            onSetSupercharged={setSupercharged}
             onRemove={remove}
           />
         </>

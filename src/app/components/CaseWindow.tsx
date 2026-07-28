@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import disconnectIcon from './image/Disconnect_Icon.png';
 import type { Case, CaseStatus } from './DispatchBoard';
+import { CopyableSystem } from './CopyableSystem';
 import { translateText, toDeepLTargetLang, getDeepLApiKey, setDeepLApiKey } from '../services/translationService';
 import { langblyTranslate, toLangblyTargetLang, getLangblyApiKey, setLangblyApiKey } from '../services/langblyService';
 import { Button } from '@/app/components/ui/button';
@@ -693,7 +694,7 @@ export function CaseWindow({
               <span>•</span>
               <span className="text-slate-400 font-medium">{getPlatformShorthand()}</span>
               <span className="text-slate-500">•</span>
-              <span className="text-slate-400 truncate">{caseData.system}</span>
+              <CopyableSystem system={caseData.system} className="text-slate-400 truncate" />
             </div>
             <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
               {caseData.language && (
