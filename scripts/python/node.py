@@ -118,6 +118,54 @@ def _langbly_forward(path, headers, body, method='POST'):
         print(f"[Langbly] Failed: {e}")
         return 502, 'text/plain', str(e).encode()
 
+def _spansh_forward(path, headers, body, method='POST'):
+    """Forward to spansh.co.uk.
+
+    Spansh serves no Access-Control-Allow-Origin header at all -- its preflight
+    returns 204 with no CORS headers -- so the browser cannot call it directly.
+    Routing through this proxy is the only way the board can plot routes.
+
+    Two endpoints are used:
+      POST /api/generic/route  -- galaxy plotter, takes use_supercharge=0|1
+      GET  /api/results/<job>  -- poll until {"status": "ok"}
+    """
+    target = 'https://spansh.co.uk' + path[len('/spansh-proxy'):]
+
+    req = urllib.request.Request(
+        target,
+        data=body if method == 'POST' else None,
+        headers={
+            # The plotter takes form-encoded bodies, not JSON.
+            'Content-Type': headers.get('content-type', 'application/x-www-form-urlencoded'),
+            'User-Agent': 'FuelRatsDispatchBoard/1.0',
+        },
+        method=method,
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = resp.read()
+            try:
+                parsed = json.loads(data)
+                # The results payload echoes the job id too, so key the log on
+                # the request rather than on the presence of a 'job' field.
+                if method == 'POST':
+                    print(f"[Spansh] queued job {parsed.get('job')}")
+                elif parsed.get('status') == 'ok':
+                    jumps = len(parsed.get('result', {}).get('jumps', [])) - 1
+                    print(f"[Spansh] route done - {jumps} jumps")
+            except Exception:
+                pass
+            return resp.status, resp.headers.get('Content-Type', 'application/json'), data
+    except urllib.error.HTTPError as e:
+        data = e.read()
+        print(f"[Spansh] Error {e.code}: {data.decode('utf-8', errors='replace')[:200]}")
+        return e.code, 'application/json', data
+    except Exception as e:
+        print(f"[Spansh] Failed: {e}")
+        return 502, 'text/plain', str(e).encode()
+
+
 PROXY_PORT = 8081
 CORS = (
     'Access-Control-Allow-Origin: *\r\n'
@@ -159,7 +207,11 @@ async def handle_deepl_http(reader, writer):
                 break
             body += chunk
 
-        if path.startswith('/langbly-proxy/'):
+        if path.startswith('/spansh-proxy/'):
+            status, content_type, resp_body = await asyncio.get_event_loop().run_in_executor(
+                None, _spansh_forward, path, headers, body if body else None, method
+            )
+        elif path.startswith('/langbly-proxy/'):
             status, content_type, resp_body = await asyncio.get_event_loop().run_in_executor(
                 None, _langbly_forward, path, headers, body if body else None, method
             )

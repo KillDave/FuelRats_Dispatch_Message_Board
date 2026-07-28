@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { X, AlertTriangle, Star, Globe, Building2, Loader2, ChevronDown, ChevronUp } from 'lucide-react';
 import type { Case } from './DispatchBoard';
+import { CopyableSystem } from './CopyableSystem';
 
 interface EdsmBody {
   name: string;
@@ -179,7 +180,7 @@ export function RatCaseDetail({ caseData, isClosed = false, onClose }: RatCaseDe
             </span>
           </div>
           <div className={`flex items-center gap-2 text-sm mt-0.5 ${isClosed ? 'text-green-100' : 'text-slate-400'}`}>
-            <span>{caseData.system}</span>
+            <CopyableSystem system={caseData.system} />
             {caseData.landmark && (
               <span className={isClosed ? 'text-green-200/80' : 'text-slate-500'}>· {caseData.landmark.distance.toFixed(1)}ly from {caseData.landmark.name}</span>
             )}

@@ -1,0 +1,94 @@
+// GENERATED from EDCD/coriolis-data (modules/standard/frame_shift_drive.json
+// and modules/internal/guardian_fsd_booster.json). Do not edit by hand.
+//
+// Spansh's galaxy plotter does not accept a ship loadout -- it wants the
+// underlying FSD constants. Only optimal mass is present in an EDSY export
+// (as FSDOptimalMass); fuel multiplier, fuel power and max fuel per jump are
+// properties of the drive model and have to come from a table like this.
+
+export interface FsdStats {
+  optmass: number;
+  maxfuel: number;
+  fuelmul: number;
+  fuelpower: number;
+}
+
+/** Keyed on the lowercased journal module symbol, e.g. int_hyperdrive_size5_class5. */
+export const FSD_STATS: Record<string, FsdStats> = {
+  'int_hyperdrive_overcharge_size2_class1': { optmass: 60, maxfuel: 0.6, fuelmul: 0.008, fuelpower: 2.0 },
+  'int_hyperdrive_overcharge_size2_class2': { optmass: 90, maxfuel: 0.9, fuelmul: 0.012, fuelpower: 2.0 },
+  'int_hyperdrive_overcharge_size2_class3': { optmass: 90, maxfuel: 0.9, fuelmul: 0.012, fuelpower: 2.0 },
+  'int_hyperdrive_overcharge_size2_class4': { optmass: 90, maxfuel: 0.9, fuelmul: 0.012, fuelpower: 2.0 },
+  'int_hyperdrive_overcharge_size2_class5': { optmass: 100, maxfuel: 1, fuelmul: 0.013, fuelpower: 2.0 },
+  'int_hyperdrive_overcharge_size3_class1': { optmass: 100, maxfuel: 1.2, fuelmul: 0.008, fuelpower: 2.15 },
+  'int_hyperdrive_overcharge_size3_class2': { optmass: 150, maxfuel: 1.8, fuelmul: 0.012, fuelpower: 2.15 },
+  'int_hyperdrive_overcharge_size3_class3': { optmass: 150, maxfuel: 1.8, fuelmul: 0.012, fuelpower: 2.15 },
+  'int_hyperdrive_overcharge_size3_class4': { optmass: 150, maxfuel: 1.8, fuelmul: 0.012, fuelpower: 2.15 },
+  'int_hyperdrive_overcharge_size3_class5': { optmass: 167, maxfuel: 1.9, fuelmul: 0.013, fuelpower: 2.15 },
+  'int_hyperdrive_overcharge_size4_class1': { optmass: 350, maxfuel: 2, fuelmul: 0.008, fuelpower: 2.3 },
+  'int_hyperdrive_overcharge_size4_class2': { optmass: 525, maxfuel: 3, fuelmul: 0.012, fuelpower: 2.3 },
+  'int_hyperdrive_overcharge_size4_class3': { optmass: 525, maxfuel: 3, fuelmul: 0.012, fuelpower: 2.3 },
+  'int_hyperdrive_overcharge_size4_class4': { optmass: 525, maxfuel: 3, fuelmul: 0.012, fuelpower: 2.3 },
+  'int_hyperdrive_overcharge_size4_class5': { optmass: 585, maxfuel: 3.2, fuelmul: 0.013, fuelpower: 2.3 },
+  'int_hyperdrive_overcharge_size5_class1': { optmass: 700, maxfuel: 3.3, fuelmul: 0.008, fuelpower: 2.45 },
+  'int_hyperdrive_overcharge_size5_class2': { optmass: 1050, maxfuel: 5, fuelmul: 0.012, fuelpower: 2.45 },
+  'int_hyperdrive_overcharge_size5_class3': { optmass: 1050, maxfuel: 5, fuelmul: 0.012, fuelpower: 2.45 },
+  'int_hyperdrive_overcharge_size5_class4': { optmass: 1050, maxfuel: 5, fuelmul: 0.012, fuelpower: 2.45 },
+  'int_hyperdrive_overcharge_size5_class5': { optmass: 1175, maxfuel: 5.2, fuelmul: 0.013, fuelpower: 2.45 },
+  'int_hyperdrive_overcharge_size6_class1': { optmass: 1200, maxfuel: 5.3, fuelmul: 0.008, fuelpower: 2.6 },
+  'int_hyperdrive_overcharge_size6_class2': { optmass: 1800, maxfuel: 8, fuelmul: 0.012, fuelpower: 2.6 },
+  'int_hyperdrive_overcharge_size6_class3': { optmass: 1800, maxfuel: 8, fuelmul: 0.012, fuelpower: 2.6 },
+  'int_hyperdrive_overcharge_size6_class4': { optmass: 1800, maxfuel: 8, fuelmul: 0.012, fuelpower: 2.6 },
+  'int_hyperdrive_overcharge_size6_class5': { optmass: 2000, maxfuel: 8.3, fuelmul: 0.013, fuelpower: 2.6 },
+  'int_hyperdrive_overcharge_size7_class1': { optmass: 1800, maxfuel: 8.5, fuelmul: 0.008, fuelpower: 2.75 },
+  'int_hyperdrive_overcharge_size7_class2': { optmass: 2700, maxfuel: 12.8, fuelmul: 0.012, fuelpower: 2.75 },
+  'int_hyperdrive_overcharge_size7_class3': { optmass: 2700, maxfuel: 12.8, fuelmul: 0.012, fuelpower: 2.75 },
+  'int_hyperdrive_overcharge_size7_class4': { optmass: 2700, maxfuel: 12.8, fuelmul: 0.012, fuelpower: 2.75 },
+  'int_hyperdrive_overcharge_size7_class5': { optmass: 3000, maxfuel: 13.1, fuelmul: 0.013, fuelpower: 2.75 },
+  'int_hyperdrive_overcharge_size8_class1': { optmass: 2800, maxfuel: 13.6, fuelmul: 0.008, fuelpower: 2.9 },
+  'int_hyperdrive_overcharge_size8_class2': { optmass: 4200, maxfuel: 20.4, fuelmul: 0.012, fuelpower: 2.9 },
+  'int_hyperdrive_overcharge_size8_class3': { optmass: 4200, maxfuel: 20.4, fuelmul: 0.012, fuelpower: 2.9 },
+  'int_hyperdrive_overcharge_size8_class4': { optmass: 4200, maxfuel: 20.4, fuelmul: 0.012, fuelpower: 2.9 },
+  'int_hyperdrive_overcharge_size8_class5': { optmass: 4670, maxfuel: 20.7, fuelmul: 0.013, fuelpower: 2.9 },
+  'int_hyperdrive_overcharge_size8_class5_overchargebooster_mkii': { optmass: 4670, maxfuel: 6.8, fuelmul: 0.011, fuelpower: 2.5025 },
+  'int_hyperdrive_size2_class1': { optmass: 48, maxfuel: 0.6, fuelmul: 0.011, fuelpower: 2 },
+  'int_hyperdrive_size2_class2': { optmass: 54, maxfuel: 0.6, fuelmul: 0.01, fuelpower: 2 },
+  'int_hyperdrive_size2_class3': { optmass: 60, maxfuel: 0.6, fuelmul: 0.008, fuelpower: 2 },
+  'int_hyperdrive_size2_class4': { optmass: 75, maxfuel: 0.8, fuelmul: 0.01, fuelpower: 2 },
+  'int_hyperdrive_size2_class5': { optmass: 90, maxfuel: 0.9, fuelmul: 0.012, fuelpower: 2 },
+  'int_hyperdrive_size3_class1': { optmass: 80, maxfuel: 1.2, fuelmul: 0.011, fuelpower: 2.15 },
+  'int_hyperdrive_size3_class2': { optmass: 90, maxfuel: 1.2, fuelmul: 0.01, fuelpower: 2.15 },
+  'int_hyperdrive_size3_class3': { optmass: 100, maxfuel: 1.2, fuelmul: 0.008, fuelpower: 2.15 },
+  'int_hyperdrive_size3_class4': { optmass: 125, maxfuel: 1.5, fuelmul: 0.01, fuelpower: 2.15 },
+  'int_hyperdrive_size3_class5': { optmass: 150, maxfuel: 1.8, fuelmul: 0.012, fuelpower: 2.15 },
+  'int_hyperdrive_size4_class1': { optmass: 280, maxfuel: 2, fuelmul: 0.011, fuelpower: 2.3 },
+  'int_hyperdrive_size4_class2': { optmass: 315, maxfuel: 2, fuelmul: 0.01, fuelpower: 2.3 },
+  'int_hyperdrive_size4_class3': { optmass: 350, maxfuel: 2, fuelmul: 0.008, fuelpower: 2.3 },
+  'int_hyperdrive_size4_class4': { optmass: 437.5, maxfuel: 2.5, fuelmul: 0.01, fuelpower: 2.3 },
+  'int_hyperdrive_size4_class5': { optmass: 525, maxfuel: 3, fuelmul: 0.012, fuelpower: 2.3 },
+  'int_hyperdrive_size5_class1': { optmass: 560, maxfuel: 3.3, fuelmul: 0.011, fuelpower: 2.45 },
+  'int_hyperdrive_size5_class2': { optmass: 630, maxfuel: 3.3, fuelmul: 0.01, fuelpower: 2.45 },
+  'int_hyperdrive_size5_class3': { optmass: 700, maxfuel: 3.3, fuelmul: 0.008, fuelpower: 2.45 },
+  'int_hyperdrive_size5_class4': { optmass: 875, maxfuel: 4.1, fuelmul: 0.01, fuelpower: 2.45 },
+  'int_hyperdrive_size5_class5': { optmass: 1050, maxfuel: 5, fuelmul: 0.012, fuelpower: 2.45 },
+  'int_hyperdrive_size6_class1': { optmass: 960, maxfuel: 5.3, fuelmul: 0.011, fuelpower: 2.6 },
+  'int_hyperdrive_size6_class2': { optmass: 1080, maxfuel: 5.3, fuelmul: 0.01, fuelpower: 2.6 },
+  'int_hyperdrive_size6_class3': { optmass: 1200, maxfuel: 5.3, fuelmul: 0.008, fuelpower: 2.6 },
+  'int_hyperdrive_size6_class4': { optmass: 1500, maxfuel: 6.6, fuelmul: 0.01, fuelpower: 2.6 },
+  'int_hyperdrive_size6_class5': { optmass: 1800, maxfuel: 8, fuelmul: 0.012, fuelpower: 2.6 },
+  'int_hyperdrive_size7_class1': { optmass: 1440, maxfuel: 8.5, fuelmul: 0.011, fuelpower: 2.75 },
+  'int_hyperdrive_size7_class2': { optmass: 1620, maxfuel: 8.5, fuelmul: 0.01, fuelpower: 2.75 },
+  'int_hyperdrive_size7_class3': { optmass: 1800, maxfuel: 8.5, fuelmul: 0.008, fuelpower: 2.75 },
+  'int_hyperdrive_size7_class4': { optmass: 2250, maxfuel: 10.6, fuelmul: 0.01, fuelpower: 2.75 },
+  'int_hyperdrive_size7_class5': { optmass: 2700, maxfuel: 12.8, fuelmul: 0.012, fuelpower: 2.75 },
+  'int_missing_hyperdrive': { optmass: 0, maxfuel: 0, fuelmul: 0, fuelpower: 0 },
+};
+
+/** Guardian FSD Booster jump range bonus, keyed on module size. */
+export const GUARDIAN_BOOSTER_LY: Record<number, number> = {
+  1: 4,
+  2: 6,
+  3: 7.75,
+  4: 9.25,
+  5: 10.5,
+};

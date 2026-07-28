@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import type { Case } from './DispatchBoard';
 import type { AccountCardDist } from '../hooks/useRatAccounts';
+import { CopyableSystem } from './CopyableSystem';
 
 const borderByStatus: Record<string, string> = {
   'code-red': 'border-l-red-500',
@@ -26,9 +27,11 @@ export interface RatCaseCardProps {
   caseData: Case;
   onSelect: () => void;
   accountDistances?: AccountCardDist[];
+  /** Omit to hide the jump column entirely. */
+  onPlotJumps?: (accountId: string) => void;
 }
 
-export function RatCaseCard({ caseData, onSelect, accountDistances = [] }: RatCaseCardProps) {
+export function RatCaseCard({ caseData, onSelect, accountDistances = [], onPlotJumps }: RatCaseCardProps) {
   const [elapsed, setElapsed] = useState(0);
 
   useEffect(() => {
@@ -66,7 +69,7 @@ export function RatCaseCard({ caseData, onSelect, accountDistances = [] }: RatCa
             </span>
           </div>
           <div className="flex items-center gap-2 text-xs text-slate-400 mt-0.5 flex-wrap">
-            <span>{caseData.system}</span>
+            <CopyableSystem system={caseData.system} />
             {caseData.landmark && (
               <span className="text-slate-500">· {caseData.landmark.distance.toFixed(1)}ly from {caseData.landmark.name}</span>
             )}
@@ -94,6 +97,25 @@ export function RatCaseCard({ caseData, onSelect, accountDistances = [] }: RatCa
                 : a.status === 'error'     ? <span className="text-red-400/60">unknown</span>
                 : <span className="text-orange-300">{a.distance!.toFixed(1)} ly</span>}
               </span>
+              {/* Jumps are plotted on request: each one is a ~10s job on Spansh,
+                  so doing every case x account pair automatically would hammer
+                  a free third-party service. Results are cached once fetched. */}
+              {a.status === 'done' && onPlotJumps && (
+                <span className="font-mono flex-shrink-0 w-16 text-right">
+                  {a.jumpStatus === 'plotting' ? <span className="text-slate-600 animate-pulse">···</span>
+                  : a.jumpStatus === 'done'     ? <span className="text-sky-300">{a.jumps}j</span>
+                  : a.jumpStatus === 'no-ship'  ? <span className="text-slate-700" title="Add an EDSY build to this account">no ship</span>
+                  : a.jumpStatus === 'error'    ? <span className="text-red-400/60">failed</span>
+                  : <span
+                      role="button"
+                      tabIndex={0}
+                      title="Plot this route with Spansh"
+                      onClick={e => { e.stopPropagation(); onPlotJumps(a.id); }}
+                      onKeyDown={e => { if (e.key === 'Enter') { e.stopPropagation(); onPlotJumps(a.id); } }}
+                      className="text-slate-600 hover:text-sky-300 cursor-pointer transition-colors"
+                    >plot</span>}
+                </span>
+              )}
             </div>
           ))}
         </div>
