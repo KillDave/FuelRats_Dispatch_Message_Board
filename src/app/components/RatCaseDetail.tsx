@@ -246,12 +246,12 @@ export function RatCaseDetail({ caseData, isClosed = false, onClose }: RatCaseDe
                     );
                     return (
                       <div key={rat} className={`flex items-center gap-2 text-sm rounded px-1 ${fueled ? 'bg-green-500/20' : ''}`}>
-                        <span className={`flex-1 truncate ${fueled ? 'text-green-300' : 'text-slate-300'}`} title={rat}>
+                        <span className={`flex-1 min-w-0 truncate ${fueled ? 'text-green-300' : 'text-slate-300'}`} title={rat}>
                           {nick}
                           {nick !== rat && <span className="text-slate-600 text-xs ml-1.5">{rat}</span>}
                         </span>
-                        {fueled && <span className="text-xs font-semibold text-green-400">FUEL+</span>}
-                        <div className="flex items-center gap-1">
+                        {fueled && <span className="text-xs font-semibold text-green-400 flex-shrink-0">FUEL+</span>}
+                        <div className="flex items-center gap-1 flex-shrink-0">
                           {stages.map(({ key, label }, idx) => {
                             const val = prog[key];
                             const explicitPositive = val === '+';

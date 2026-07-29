@@ -4,8 +4,13 @@ import { RatBoard } from './RatBoard';
 import { MessageEditorPage } from './MessageEditorPage';
 import { CopyableSystem } from './CopyableSystem';
 import { Button } from '@/app/components/ui/button';
-import { Eye, EyeOff, Sidebar, User, MapPin, AlertTriangle, Clock, LogOut, Plus, Shield, ChevronDown, MessageSquare, Settings } from 'lucide-react';
-import { fuelRatsApi } from '../services/fuelRatsApi';
+import { Eye, EyeOff, Sidebar, User, MapPin, AlertTriangle, Clock, LogOut, Plus, Shield, ChevronDown, MessageSquare, Settings, Bell } from 'lucide-react';
+import {
+  ALERT_PLATFORMS, alertNewCase, desktopPermission, loadAlertSettings,
+  requestDesktopPermission, saveAlertSettings, testAlert,
+  type AlertSettings,
+} from '../services/alertService';
+import { fuelRatsApi, apiDebug } from '../services/fuelRatsApi';
 import { ircWebSocket, IRCMessage, IRCConnectionStatus } from '../services/ircWebSocket';
 import { IRCConnectionPanel } from './IRCConnectionPanel';
 import fuelRatsLogo from './image/TransparentBackgroundRatto.png';
@@ -175,16 +180,116 @@ function loadButtonGroups(): QuickMessageGroup[] {
   return DEFAULT_BUTTON_GROUPS;
 }
 
+/** Checkbox row used by the alert settings below. */
+function AlertToggle({
+  label,
+  checked,
+  onChange,
+  hint,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (next: boolean) => void;
+  hint?: string;
+}) {
+  return (
+    <label className="flex items-center gap-2 px-3 py-1 text-xs text-slate-300 hover:bg-slate-700/50 rounded cursor-pointer">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={e => onChange(e.target.checked)}
+        className="accent-orange-500"
+      />
+      <span className="flex-1">{label}</span>
+      {hint && <span className="text-slate-600">{hint}</span>}
+    </label>
+  );
+}
+
+function AlertSettingsMenu({
+  settings,
+  onChange,
+}: {
+  settings: AlertSettings;
+  onChange: (next: AlertSettings) => void;
+}) {
+  const [permission, setPermission] = React.useState(desktopPermission());
+
+  const setDesktop = async (on: boolean) => {
+    // Asked for at the moment it is switched on: a permission prompt on page
+    // load, before anyone has asked for notifications, gets dismissed reflexively
+    // and Chrome then refuses to ask again.
+    if (on) {
+      const granted = await requestDesktopPermission();
+      setPermission(desktopPermission());
+      if (!granted) return; // leave the toggle off rather than lie about it
+    }
+    onChange({ ...settings, desktop: on });
+  };
+
+  return (
+    <>
+      <div className="px-3 pt-1.5 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+        New case alerts
+      </div>
+      <AlertToggle
+        label="Windows notification"
+        checked={settings.desktop}
+        onChange={on => void setDesktop(on)}
+        hint={
+          permission === 'unsupported' ? 'n/a'
+          : permission === 'denied'    ? 'blocked'
+          : undefined
+        }
+      />
+      {permission === 'denied' && (
+        <p className="px-3 pb-1 text-[10px] text-slate-600 leading-snug max-w-56">
+          Blocked for this site — allow notifications in the browser's address-bar
+          site settings, then re-enable here.
+        </p>
+      )}
+      <AlertToggle
+        label="Sound"
+        checked={settings.sound}
+        onChange={on => onChange({ ...settings, sound: on })}
+      />
+      <div className="px-3 pt-1.5 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+        Alert on platform
+      </div>
+      {ALERT_PLATFORMS.map(({ key, label }) => (
+        <AlertToggle
+          key={key}
+          label={label}
+          checked={settings.platforms[key]}
+          onChange={on => onChange({ ...settings, platforms: { ...settings.platforms, [key]: on } })}
+        />
+      ))}
+      <button
+        onClick={() => testAlert(settings)}
+        disabled={!settings.desktop && !settings.sound}
+        className="flex items-center gap-2 w-full text-left px-3 py-1.5 rounded text-xs text-slate-300 hover:bg-slate-700/50 disabled:text-slate-600 disabled:hover:bg-transparent transition-colors"
+      >
+        <Bell className="w-3 h-3" />
+        Test alert
+      </button>
+    </>
+  );
+}
+
 function HeaderMenu({
   view,
   onSetView,
   onAddCase,
   onLogout,
+  alertSettings,
+  onAlertSettingsChange,
 }: {
   view: string;
   onSetView: (v: 'board' | 'rat' | 'editor') => void;
   onAddCase: () => void;
   onLogout?: () => void;
+  alertSettings: AlertSettings;
+  onAlertSettingsChange: (next: AlertSettings) => void;
 }) {
   const [open, setOpen] = React.useState(false);
   const ref = React.useRef<HTMLDivElement>(null);
@@ -229,6 +334,8 @@ function HeaderMenu({
             <Plus className="w-3 h-3" />
             Add Case
           </button>
+          <div className="my-1 border-t border-slate-700/60" />
+          <AlertSettingsMenu settings={alertSettings} onChange={onAlertSettingsChange} />
           <div className="my-1 border-t border-slate-700/60" />
           <button
             onClick={() => { window.location.hash = '#deepl'; setOpen(false); }}
@@ -275,6 +382,15 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
   const [isLoadingApi, setIsLoadingApi] = useState(false);
   const [, setRateLimitRemaining] = useState(0);
   const [, setSecondsToReset] = useState(0);
+  const [alertSettings, setAlertSettings] = useState<AlertSettings>(loadAlertSettings);
+  /** Cases already alerted for, so a re-render or refetch cannot ping twice. */
+  const alertedRef = useRef<Set<string>>(new Set());
+  /**
+   * Whether the first batch of cases has been absorbed. Every case is "new" on
+   * load, and firing for all of them would mean a burst of notifications for
+   * rescues that are already underway.
+   */
+  const alertsPrimedRef = useRef(false);
   const seenCaseIdsRef = useRef<Set<string>>(
     new Set(initialCases.map((c) => c.id))
   ); // Track which cases we've already seen to avoid flashing on every poll
@@ -393,6 +509,13 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
         prevCases
           .filter((c) => !fetchedIds.has(c.id))
           .forEach((c) => seenCaseIdsRef.current.delete(c.id));
+
+        if (apiDebug()) {
+          console.log(
+            '[merge]  in:', fetchedCases.map(c => `${c.id}=${c.status}`).join(' '),
+            '\n[merge] out:', updatedCases.map(c => `${c.id}=${c.status}`).join(' '),
+          );
+        }
 
         return updatedCases;
       });
@@ -916,6 +1039,39 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
     return exp ? `${short}-${expansionMap[exp] ?? exp}` : short;
   };
 
+  // New-case alerts.
+  //
+  // Driven off the case list rather than from inside the merge, so it stays
+  // idempotent: the merge's updater can run more than once for a single refetch,
+  // and a notification that fires twice is very obvious.
+  useEffect(() => {
+    if (isLoadingApi) return;
+
+    if (!alertsPrimedRef.current) {
+      cases.forEach(c => alertedRef.current.add(c.id));
+      alertsPrimedRef.current = true;
+      return;
+    }
+
+    // Forget cases that have gone, so a reused case number alerts again rather
+    // than being mistaken for one already seen.
+    const present = new Set(cases.map(c => c.id));
+    alertedRef.current.forEach(id => {
+      if (!present.has(id)) alertedRef.current.delete(id);
+    });
+
+    for (const c of cases) {
+      if (alertedRef.current.has(c.id)) continue;
+      alertedRef.current.add(c.id);
+      alertNewCase(c, alertSettings);
+    }
+  }, [cases, isLoadingApi, alertSettings]);
+
+  const updateAlertSettings = (next: AlertSettings) => {
+    setAlertSettings(next);
+    saveAlertSettings(next);
+  };
+
   const sortedCases = [...cases].sort(compareCases);
   const visibleCases = sortedCases.filter((c) => toggledCaseIds.has(c.id));
 
@@ -1079,6 +1235,8 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
               onSetView={setView}
               onAddCase={() => setShowAddCase(true)}
               onLogout={onLogout}
+              alertSettings={alertSettings}
+              onAlertSettingsChange={updateAlertSettings}
             />
           </div>
 
@@ -1125,20 +1283,28 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
               {sortedCases.map((caseData) => {
                 const isVisible = toggledCaseIds.has(caseData.id);
                 const hasUnread = unreadCases.has(caseData.id);
-                // Parked cases are greyed back so the eye skips them, but not when
-                // there is something unread -- a client saying anything at all is
-                // the point at which the case stops being parked.
-                const dimmed = caseData.status === 'inactive' && !hasUnread;
+                // A parked case always reads as parked. Earlier attempts made the
+                // greying conditional on there being nothing unread, which meant a
+                // case could be labelled INACTIVE and still look exactly like an
+                // active one -- unread is only cleared when the case window reports
+                // a click, so the flag sticks around long after it stops meaning
+                // anything.
+                //
+                // One appearance for every parked case, no exceptions. Varying it
+                // by unread or visibility was tried twice and both times produced a
+                // case that said INACTIVE while looking active.
+                //
+                // Applied to the row's contents rather than the row itself so the
+                // coloured left border and the pulsing background survive at full
+                // strength -- opacity on the button would take its own border with
+                // it, which is what made the earlier attempts trade one signal off
+                // against the other.
+                const dimmed = caseData.status === 'inactive';
                 return (
                   <button
                     key={caseData.id}
                     onClick={() => toggleCase(caseData.id)}
-                    // Inline, because the class strings below also set opacity and
-                    // Tailwind gives no ordering guarantee between two of them.
-                    style={dimmed ? { opacity: 0.45 } : undefined}
                     className={`relative w-full px-4 py-3 border-b border-slate-800 hover:bg-slate-800 transition-colors text-left ${
-                      dimmed ? 'grayscale' : ''
-                    } ${
                       isVisible ? 'bg-slate-850' : 'bg-slate-900 opacity-60'
                     } ${hasUnread && isVisible ? 'animate-pulse bg-orange-500/10 border-l-4 border-l-orange-500' : ''} ${hasUnread && !isVisible ? 'animate-pulse bg-red-500/20 border-l-4 border-l-red-500 opacity-100' : ''}`}
                   >
@@ -1150,6 +1316,10 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
                         style={{ opacity: 0.4 }}
                       />
                     )}
+                    <div
+                      style={dimmed ? { opacity: 0.45 } : undefined}
+                      className={dimmed ? 'grayscale' : undefined}
+                    >
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-1">
@@ -1217,6 +1387,7 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
                           {shortPlatform(caseData.platform)}
                         </span>
                       </div>
+                    </div>
                     </div>
                   </button>
                 );

@@ -109,6 +109,18 @@ interface ApiResponse {
 // FuelRats uses array format: [eventType, statusCode, data, meta]
 type WSMessage = [string, number, any, any];
 
+/**
+ * Temporary: set localStorage fr_debug = "1" to trace where a status change is
+ * getting lost between the API and the board. Off by default so it cannot spam.
+ */
+export function apiDebug(): boolean {
+  try {
+    return localStorage.getItem('fr_debug') === '1';
+  } catch {
+    return false;
+  }
+}
+
 
 export class FuelRatsApiService {
   private wsUrl = 'wss://api.fuelrats.com';
@@ -134,10 +146,16 @@ export class FuelRatsApiService {
    * someone reloaded the page. Events still drive the fast path; this only bounds
    * how long a miss can persist.
    *
-   * 30s against a 3600/hour rate limit is 120 requests/hour.
+   * Matched to the polling fallback at 10s. It was 30s, which is long enough that
+   * watching for a change to land reads as "nothing happened until I reloaded".
+   * Socket events do arrive and are the fast path -- verified against the live API
+   * -- but this is the part that is guaranteed, so it has to be quick enough that
+   * a missed event is not mistaken for a broken board.
+   *
+   * 360 requests/hour against a 3600/hour rate limit.
    */
   private reconcileInterval: number | null = null;
-  private reconcileDelay: number = 30000;
+  private reconcileDelay: number = 10000;
   
   // Callbacks
   private onUpdateCallback: ((cases: Case[]) => void) | null = null;
@@ -327,6 +345,8 @@ export class FuelRatsApiService {
       return;
     }
 
+    if (apiDebug()) console.log('[ws]', eventType, typeof eventData === 'string' ? eventData : '(object)');
+
     if (eventType === 'fuelrats.rescuecreate' || eventType === 'fuelrats.rescueupdate') {
       this.fetchRescueById(eventData);
       return;
@@ -383,7 +403,10 @@ export class FuelRatsApiService {
     try {
       const headers: HeadersInit = { 'Accept': 'application/json' };
       if (this.apiKey) headers['Authorization'] = `Bearer ${this.apiKey}`;
-      const response = await fetch(`${this.apiUrl}/${id}`, { headers });
+      // no-store: the API sends an ETag but no max-age, which lets the browser
+      // apply heuristic freshness and hand back a cached body. For a poll whose
+      // whole job is to notice change, that is the one thing it must not do.
+      const response = await fetch(`${this.apiUrl}/${id}`, { headers, cache: 'no-store' });
       if (!response.ok) {
         if (response.status === 404) {
           // Rescue gone — remove from cache
@@ -470,7 +493,7 @@ export class FuelRatsApiService {
       const headers: HeadersInit = { 'Accept': 'application/json' };
       if (this.apiKey) headers['Authorization'] = `Bearer ${this.apiKey}`;
 
-      const response = await fetch(`${this.apiUrl}?${params.toString()}`, { headers });
+      const response = await fetch(`${this.apiUrl}?${params.toString()}`, { headers, cache: 'no-store' });
 
       if (!response.ok) {
         throw new Error(`API request failed: ${response.status}`);
@@ -819,6 +842,11 @@ export class FuelRatsApiService {
       legacy: 'Legacy'
     };
 
+    // The spec has platform and expansion as nullable even though they are typed
+    // as strings here, and the fallback used to call .toUpperCase() directly --
+    // one null would throw inside transformRescue and take the whole poll with it.
+    if (!platform) return 'Unknown';
+
     const platformStr = platformMap[platform] || platform.toUpperCase();
 
     // PlayStation and Xbox don't have meaningful expansion variants — just show the platform
@@ -826,6 +854,7 @@ export class FuelRatsApiService {
       return platformStr;
     }
 
+    if (!expansion) return platformStr;
     const expansionStr = expansionMap[expansion] || expansion;
     return `${platformStr} - ${expansionStr}`;
   }
@@ -892,11 +921,17 @@ export class FuelRatsApiService {
    * DispatchBoard, so replacing wholesale here is safe.
    */
   private async reconcile(): Promise<void> {
-    if (!this.isConnected()) return;
+    if (!this.isConnected()) {
+      if (apiDebug()) console.log('[reconcile] skipped — socket not open');
+      return;
+    }
     try {
       const cases = await this.fetchActiveRescues();
       this.activeCases.clear();
       cases.forEach(c => this.activeCases.set(c.id, c));
+      if (apiDebug()) {
+        console.log('[reconcile]', cases.map(c => `${c.id}=${c.status}`).join('  '));
+      }
       if (this.onUpdateCallback) this.onUpdateCallback(cases);
     } catch (error) {
       console.error('[FuelRats API] Reconcile failed:', error);

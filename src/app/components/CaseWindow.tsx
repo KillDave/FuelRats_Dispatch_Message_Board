@@ -814,8 +814,15 @@ export function CaseWindow({
 
                 return (
                   <div key={rat} className={`flex items-center gap-2 text-xs rounded px-1 ${fueled ? 'bg-green-500/20' : ''}`}>
-                    <span className={`w-24 truncate flex-shrink-0 ${fueled ? 'text-green-300' : 'text-slate-400'}`} title={rat}>{nick}</span>
-                    <div className="flex items-center gap-1">
+                    {/* The nick gives up space, the badges never do. It used to be
+                        a fixed w-24 that could not shrink while the badges could,
+                        so in a narrow column -- several cases open at once -- the
+                        stages were pushed off the edge, which is the one part of
+                        this row that has to stay readable. min-w-0 is what actually
+                        lets it shrink; flex items refuse to go below their content
+                        width without it. */}
+                    <span className={`flex-1 min-w-0 truncate ${fueled ? 'text-green-300' : 'text-slate-400'}`} title={rat}>{nick}</span>
+                    <div className="flex items-center gap-1 flex-shrink-0">
                       {stages.map(({ key, label }, idx) => {
                         const val = prog[key];
                         const explicitPositive = val === '+' || val === true;
