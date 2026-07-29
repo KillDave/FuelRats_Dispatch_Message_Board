@@ -124,6 +124,20 @@ export class FuelRatsApiService {
   private maxWsFailures: number = 3;
   private pollingInterval: number | null = null;
   private pollingDelay: number = 10000; // 10 seconds
+  /**
+   * Periodic full refetch that runs *while the WebSocket is connected*.
+   *
+   * Without it the board's freshness depends on receiving every single event:
+   * there was no reconcile unless the socket had already failed maxWsFailures
+   * times, so one dropped fuelrats.rescueupdate left a case stale indefinitely.
+   * That is how a case set inactive kept rendering as a flashing code red until
+   * someone reloaded the page. Events still drive the fast path; this only bounds
+   * how long a miss can persist.
+   *
+   * 30s against a 3600/hour rate limit is 120 requests/hour.
+   */
+  private reconcileInterval: number | null = null;
+  private reconcileDelay: number = 30000;
   
   // Callbacks
   private onUpdateCallback: ((cases: Case[]) => void) | null = null;
@@ -182,6 +196,7 @@ export class FuelRatsApiService {
         console.log('[FuelRats WS] Connected');
         this.isConnecting = false;
         this.notifyStatusChange('connected');
+        this.startReconcile();
       };
 
       this.ws.onmessage = (event) => {
@@ -204,6 +219,7 @@ export class FuelRatsApiService {
         console.log(`[FuelRats WS] Closed — code ${event.code} (${this.getCloseCodeDescription(event.code)})`);
         this.isConnecting = false;
         this.ws = null;
+        this.stopReconcile();
 
         if (this.pollingInterval) {
           clearInterval(this.pollingInterval);
@@ -282,6 +298,15 @@ export class FuelRatsApiService {
    * FuelRats format: [eventType, statusCode, data, meta]
    */
   private handleWebSocketMessage(message: WSMessage): void {
+    // Two different array shapes arrive on this socket, which is why the names
+    // here only half fit. Replies to our own requests are
+    //   [state, httpStatus, body]
+    // but broadcast events are
+    //   [event, senderUserId, resourceId, document]
+    // so for an event `statusCode` is a user UUID, and `eventData` is the
+    // resource id rather than a payload. That is what fetchRescueById wants, so
+    // the rescue branch below is correct -- but do not read `statusCode` as a
+    // status for events, and do not expect `eventData` to be an object.
     const [eventType, statusCode, eventData] = message;
 
     if (statusCode === 200) {
@@ -798,6 +823,8 @@ export class FuelRatsApiService {
       this.pollingInterval = null;
     }
 
+    this.stopReconcile();
+
     if (this.ws) {
       this.ws.close(1000, 'Client disconnect');
       this.ws = null;
@@ -814,8 +841,43 @@ export class FuelRatsApiService {
 
     console.log('[FuelRats API] Starting REST polling fallback');
     this.notifyStatusChange('connected');
+    // The fallback poll supersedes the reconcile -- it refetches more often.
+    this.stopReconcile();
     this.fetchAndNotify();
     this.pollingInterval = window.setInterval(() => this.fetchAndNotify(), this.pollingDelay);
+  }
+
+  private startReconcile(): void {
+    if (this.reconcileInterval || this.pollingInterval) return;
+    this.reconcileInterval = window.setInterval(() => this.reconcile(), this.reconcileDelay);
+  }
+
+  private stopReconcile(): void {
+    if (this.reconcileInterval) {
+      clearInterval(this.reconcileInterval);
+      this.reconcileInterval = null;
+    }
+  }
+
+  /**
+   * Refetch every open rescue and replace the cache.
+   *
+   * The cache has to be rebuilt, not just reported: fetchAndNotify hands the
+   * fresh list to the callback but leaves activeCases untouched, so a later
+   * fetchRescueById -- which notifies from activeCases -- would undo whatever
+   * this corrected. Local state such as messages is preserved by the merge in
+   * DispatchBoard, so replacing wholesale here is safe.
+   */
+  private async reconcile(): Promise<void> {
+    if (!this.isConnected()) return;
+    try {
+      const cases = await this.fetchActiveRescues();
+      this.activeCases.clear();
+      cases.forEach(c => this.activeCases.set(c.id, c));
+      if (this.onUpdateCallback) this.onUpdateCallback(cases);
+    } catch (error) {
+      console.error('[FuelRats API] Reconcile failed:', error);
+    }
   }
 
   private async fetchAndNotify(): Promise<void> {
