@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
-import { X, AlertTriangle, Star, Globe, Building2, Loader2, ChevronDown, ChevronUp } from 'lucide-react';
+import { X, AlertTriangle, Star, Globe, Building2, Loader2, ChevronDown, ChevronUp, Users } from 'lucide-react';
 import type { Case } from './DispatchBoard';
 import { CopyableSystem } from './CopyableSystem';
+import { CaseNotes } from './CaseNotes';
+import { distanceToSeconds, formatCountdown, etaColor } from '../services/scTime';
 
 interface EdsmBody {
   name: string;
@@ -21,7 +23,6 @@ interface EdsmStation {
 
 interface RatData {
   scoopable?: boolean;
-  nearestScoopableStar?: { name: string; distance: number };
   nearestLStation?: { name: string; distanceToArrival: number; type: string };
   nearestSmStation?: { name: string; distanceToArrival: number; type: string };
   allStations: EdsmStation[];
@@ -170,9 +171,19 @@ export function RatCaseDetail({ caseData, isClosed = false, onClose }: RatCaseDe
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-white font-bold text-lg">{caseData.clientName}</span>
+            {/* The nick is what you actually type at in channel, and it often is
+                not the CMDR name shown above. */}
+            {caseData.ircNick && caseData.ircNick !== caseData.clientName && (
+              <span className="text-sm text-slate-500 font-mono" title="Client IRC nick">({caseData.ircNick})</span>
+            )}
             {caseData.oxygenStatus && (
               <span className="flex items-center gap-1 text-sm text-red-400 font-bold animate-pulse">
                 <AlertTriangle className="w-4 h-4" /> CODE RED
+              </span>
+            )}
+            {!caseData.clientInChannel && (
+              <span className="text-xs font-semibold text-red-300 border border-red-500/60 bg-red-500/10 rounded px-1.5 py-0.5">
+                DISCONNECTED
               </span>
             )}
             <span className={`text-xs border rounded px-1.5 py-0.5 ${isClosed ? 'text-green-100 border-green-400/60' : 'text-slate-400 border-slate-600'}`}>
@@ -183,6 +194,13 @@ export function RatCaseDetail({ caseData, isClosed = false, onClose }: RatCaseDe
             <CopyableSystem system={caseData.system} />
             {caseData.landmark && (
               <span className={isClosed ? 'text-green-200/80' : 'text-slate-500'}>· {caseData.landmark.distance.toFixed(1)}ly from {caseData.landmark.name}</span>
+            )}
+            {/* Flagged because it changes how a rat talks to the client, not just
+                as trivia -- a non-English case means leaning on translations. */}
+            {caseData.language && !caseData.language.toLowerCase().startsWith('en') && (
+              <span className="text-xs text-amber-300/90 border border-amber-500/40 bg-amber-500/10 rounded px-1.5 py-0.5">
+                {caseData.language}
+              </span>
             )}
             <span className={`font-mono ${isClosed ? 'text-green-200/70' : 'text-slate-600'}`}>· {elapsedStr}</span>
           </div>
@@ -199,6 +217,122 @@ export function RatCaseDetail({ caseData, isClosed = false, onClose }: RatCaseDe
       {/* Scrollable content */}
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-4xl mx-auto p-6 space-y-6">
+
+          {/* Assigned rats and their call-in progress */}
+          {caseData.assignedRats.length > 0 && (
+            <section>
+              <SectionHeader icon={<Users className="w-3 h-3" />} label="Rats on Case" count={caseData.assignedRats.length} collapsed={isCollapsed('rats')} onToggle={() => toggleSection('rats')} />
+              {!isCollapsed('rats') && (
+                <div className="bg-slate-900/60 border border-slate-700/60 rounded-lg p-3 space-y-1.5">
+                  {caseData.assignedRats.map(rat => {
+                    const nick = caseData.ratIrcNicks?.[rat] ?? rat;
+                    const prog = caseData.ratProgress?.[rat] ?? caseData.ratProgress?.[nick] ?? {};
+                    const stages = [
+                      { key: 'fr' as const, label: 'FR' },
+                      { key: 'wr' as const, label: 'WR' },
+                      { key: 'bc' as const, label: 'BC' },
+                    ];
+                    const fueled = !!prog.fuel;
+                    // Calling a later stage implies the earlier ones, so fill them
+                    // in rather than showing gaps. Matches CaseWindow.
+                    const highestPositiveIdx = stages.reduce(
+                      (max, { key }, idx) => (prog[key] === '+' ? idx : max),
+                      -1,
+                    );
+                    return (
+                      <div key={rat} className={`flex items-center gap-2 text-sm rounded px-1 ${fueled ? 'bg-green-500/20' : ''}`}>
+                        <span className={`flex-1 truncate ${fueled ? 'text-green-300' : 'text-slate-300'}`} title={rat}>
+                          {nick}
+                          {nick !== rat && <span className="text-slate-600 text-xs ml-1.5">{rat}</span>}
+                        </span>
+                        {fueled && <span className="text-xs font-semibold text-green-400">FUEL+</span>}
+                        <div className="flex items-center gap-1">
+                          {stages.map(({ key, label }, idx) => {
+                            const val = prog[key];
+                            const explicitPositive = val === '+';
+                            const cascaded = idx < highestPositiveIdx;
+                            const isPositive = explicitPositive || cascaded;
+                            const isNegative = val === '-' && !cascaded;
+                            return (
+                              <span
+                                key={key}
+                                className={`px-1.5 py-0.5 rounded font-mono text-xs font-semibold ${
+                                  isPositive
+                                    ? 'bg-green-500/20 text-green-400 border border-green-500/50'
+                                    : isNegative
+                                    ? 'bg-red-500/20 text-red-400 border border-red-500/50'
+                                    : 'bg-slate-800 text-slate-600 border border-slate-700'
+                                }`}
+                              >
+                                {label}{explicitPositive ? '+' : isNegative ? '-' : ''}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+          )}
+
+          {/* Jump calls and supercruise ETA. Both are countdowns; the elapsed
+              timer above re-renders this every second, so no extra interval. */}
+          {((caseData.jumpCalls && Object.keys(caseData.jumpCalls).length > 0) || caseData.scDistance !== undefined) && (
+            <section>
+              <div className="bg-slate-900/60 border border-slate-700/60 rounded-lg p-3 flex items-center gap-4 flex-wrap">
+                {caseData.jumpCalls && Object.keys(caseData.jumpCalls).length > 0 && (
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <span className="text-xs text-slate-500 font-semibold uppercase tracking-wider">Jumps</span>
+                    {Object.entries(caseData.jumpCalls)
+                      .sort((a, b) => a[1].jumps - b[1].jumps)
+                      .map(([nick, call]) => {
+                        // One minute per jump is the same rule of thumb dispatch uses.
+                        const totalSecs = call.jumps * 60;
+                        const etaSecs = Math.max(0, totalSecs - (Date.now() - call.timestamp.getTime()) / 1000);
+                        return (
+                          <span key={nick} className="text-sm" title={call.text}>
+                            <span className="text-slate-400">{nick}</span>
+                            <span className="text-orange-400 font-bold ml-1">{call.jumps}j</span>
+                            {etaSecs > 0 && (
+                              <span className="ml-1 font-mono text-xs" style={{ color: etaColor(etaSecs, totalSecs) }}>
+                                ({formatCountdown(etaSecs)})
+                              </span>
+                            )}
+                          </span>
+                        );
+                      })}
+                  </div>
+                )}
+                {caseData.scDistance !== undefined && (() => {
+                  const totalSecs = distanceToSeconds(caseData.scDistance.ls);
+                  const etaSecs = Math.max(0, totalSecs - (Date.now() - caseData.scDistance.timestamp.getTime()) / 1000);
+                  return (
+                    <div className="ml-auto flex items-center gap-2 text-sm">
+                      <span className="text-xs text-slate-500 font-semibold uppercase tracking-wider">SC</span>
+                      <span className="text-slate-400 font-mono text-xs">{formatLs(caseData.scDistance.ls)}</span>
+                      {etaSecs > 0
+                        ? <span className="font-mono" style={{ color: etaColor(etaSecs, totalSecs) }}>{formatCountdown(etaSecs)}</span>
+                        : <span className="font-mono text-green-400">arrived</span>}
+                    </div>
+                  );
+                })()}
+              </div>
+            </section>
+          )}
+
+          {/* Case quotes */}
+          {caseData.injections.length > 0 && (
+            <section>
+              <SectionHeader icon={null} label="Quotes" count={caseData.injections.length} collapsed={isCollapsed('notes')} onToggle={() => toggleSection('notes')} />
+              {!isCollapsed('notes') && (
+                <div className="bg-slate-900/60 border border-amber-700/30 rounded-lg p-3">
+                  <CaseNotes injections={caseData.injections} />
+                </div>
+              )}
+            </section>
+          )}
 
           {/* Recent chat */}
           {recentMessages.length > 0 && (
@@ -251,9 +385,15 @@ export function RatCaseDetail({ caseData, isClosed = false, onClose }: RatCaseDe
                     {ratData.scoopable === false && (
                       <div className="space-y-2">
                         <span className="text-sm text-white border border-slate-500/60 bg-slate-500/10 rounded px-2 py-1">Not Scoopable</span>
-                        {ratData.nearestScoopableStar && (
+                        {/* Comes off the case, which DispatchBoard has already
+                            resolved by searching nearby systems. Rat mode used to
+                            read a field on its own EDSM state that nothing ever
+                            set, so this never rendered -- leaving a rat with
+                            "Not Scoopable" and nowhere to go. */}
+                        {caseData.nearestScoopableStar && (
                           <div className="text-sm text-slate-400 mt-2">
-                            Nearest: <span className="text-slate-200">{ratData.nearestScoopableStar.name} ({ratData.nearestScoopableStar.distance.toFixed(1)}ly)</span>
+                            Nearest: <CopyableSystem system={caseData.nearestScoopableStar.name} className="text-slate-200" />
+                            <span className="text-slate-500"> ({caseData.nearestScoopableStar.distance.toFixed(1)}ly)</span>
                           </div>
                         )}
                       </div>

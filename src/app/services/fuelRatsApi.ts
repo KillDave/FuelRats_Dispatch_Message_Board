@@ -1,4 +1,4 @@
-import { Case, CaseStatus, Message } from '../components/DispatchBoard';
+import { Case, CaseStatus, Injection, Message } from '../components/DispatchBoard';
 import { authService } from './authService';
 
 interface ApiQuote {
@@ -705,6 +705,23 @@ export class FuelRatsApiService {
     );
     const clientInChannel = lastPresenceQuote?.message !== 'Client left the rescue channel';
 
+    // Quotes serve double duty: the chat log above is derived from them, but they
+    // are also the case's own record -- the same list the rescue page shows under
+    // "Quotes". Everything is kept, because the author only says who recorded a
+    // line, not how useful it is: MechaSqueak is the author of every rat call-in
+    // (`#7 1j`, `#7 rdy`, `#7 fuel+`), which is the rat action timeline, while a
+    // dispatcher is the author of both !inject notes and !grab'd client lines.
+    // Kept raw -- the relay parsing applied to the chat log rewrites the author,
+    // which for a quote would misattribute it.
+    const injections: Injection[] = attrs.quotes.map((quote, index) => ({
+      id: `${caseId}-inj-${index}`,
+      author: quote.author,
+      text: quote.message,
+      createdAt: new Date(quote.createdAt),
+      isBot: quote.author.includes('[BOT]'),
+      lastAuthor: quote.lastAuthor && quote.lastAuthor !== quote.author ? quote.lastAuthor : undefined,
+    }));
+
     return {
       id: caseId,
       apiId: rescue.id, // Store the API's UUID for WebSocket event matching
@@ -715,6 +732,7 @@ export class FuelRatsApiService {
       language: attrs.clientLanguage || undefined,
       status,
       messages,
+      injections,
       assignedRats,
       ratIrcNicks,
       oxygenStatus: attrs.codeRed ? 'CRITICAL' : undefined,

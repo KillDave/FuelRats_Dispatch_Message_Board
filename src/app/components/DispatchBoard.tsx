@@ -79,6 +79,28 @@ export interface Message {
   translation?: string; // Translated text attached to the original message
 }
 
+/**
+ * A note attached to the case with `!inject` or `!grab`, carried by the API as a
+ * "quote". These are the dispatcher's curated record of what is actually known
+ * about a rescue -- where the client is sitting, which landmark they are near --
+ * as distinct from the live chat they were pieced together from.
+ */
+export interface Injection {
+  id: string;
+  author: string;
+  text: string;
+  createdAt: Date;
+  /**
+   * Recorded by a bot rather than typed by a person. MechaSqueak records the rat
+   * call-ins and RatMama the opening signal; a dispatcher's own !inject and
+   * !grab entries are the ones worth reading first, so these are dimmed rather
+   * than dropped.
+   */
+  isBot?: boolean;
+  /** Set only when the note was later edited by someone other than its author. */
+  lastAuthor?: string;
+}
+
 export interface Case {
   id: string;
   apiId?: string; // The API's internal UUID for this rescue
@@ -89,6 +111,8 @@ export interface Case {
   language?: string;
   status: CaseStatus;
   messages: Message[];
+  /** Case notes from `!inject`/`!grab`, kept apart from the chat log. */
+  injections: Injection[];
   assignedRats: string[];
   ratIrcNicks: Record<string, string>; // CMDR name → IRC nick, derived from relay messages
   oxygenStatus?: string;

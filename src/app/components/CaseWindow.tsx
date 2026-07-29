@@ -2,6 +2,8 @@ import { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import disconnectIcon from './image/Disconnect_Icon.png';
 import type { Case, CaseStatus } from './DispatchBoard';
 import { CopyableSystem } from './CopyableSystem';
+import { CaseNotes } from './CaseNotes';
+import { distanceToSeconds, SCO_SHIPS, type ScoShipKey } from '../services/scTime';
 import { translateText, toDeepLTargetLang, getDeepLApiKey, setDeepLApiKey } from '../services/translationService';
 import { langblyTranslate, toLangblyTargetLang, getLangblyApiKey, setLangblyApiKey } from '../services/langblyService';
 import { Button } from '@/app/components/ui/button';
@@ -60,46 +62,8 @@ const statusBgColors = {
   closed: 'bg-slate-500/10',
 };
 
-// --- Supercruise time calculation (ported from SwiftSqueak/NumberFormatter.swift) ---
-const SC_ACCEL_RATE = 0.244343173;
-const SC_ACCEL_MIDPOINT = 24.3043969;
-const SC_VERTICAL_OFFSET = -90.9763924;
-
-function scSpeed(t: number, maxSpeed: number): number {
-  return maxSpeed / (1 + Math.exp(-SC_ACCEL_RATE * (t - SC_ACCEL_MIDPOINT))) + SC_VERTICAL_OFFSET;
-}
-
-function scDistanceTravelled(time: number, maxSpeed: number, steps = 200): number {
-  const dt = time / steps;
-  let dist = 0;
-  for (let i = 0; i < steps; i++) {
-    dist += 0.5 * (Math.max(0, scSpeed(i * dt, maxSpeed)) + Math.max(0, scSpeed((i + 1) * dt, maxSpeed))) * dt;
-  }
-  return dist;
-}
-
-function distanceToSeconds(ls: number, scoMaxSpeed?: number): number {
-  if (scoMaxSpeed !== undefined) {
-    let low = 0, high = 400_000;
-    while (high - low > 0.5) {
-      const mid = (low + high) / 2;
-      if (scDistanceTravelled(mid, scoMaxSpeed) < ls) low = mid; else high = mid;
-    }
-    return (low + high) / 2;
-  }
-  if (ls < 100_000) return 8.9034 * Math.pow(ls, 0.3292);
-  if (ls < 1_907_087) return -8e-23 * ls ** 4 + 4e-16 * ls ** 3 - 8e-10 * ls ** 2 + 0.0014 * ls + 264.79;
-  return (ls - 5_265_389.609) / 2001 + 3412;
-}
-
-
-const SCO_SHIPS = [
-  { key: 'cobra', label: 'Cobra Mk V', speed: 7000 },
-  { key: 'mandalay', label: 'Mandalay', speed: 4200 },
-  { key: 'caspian', label: 'Caspian', speed: 2900 },
-] as const;
-type ScoShipKey = typeof SCO_SHIPS[number]['key'];
-// ---------------------------------------------------------------------------------
+// Supercruise timing lives in services/scTime.ts so rat mode shows the same
+// numbers for the same case.
 
 export function CaseWindow({
   caseData,
@@ -146,6 +110,9 @@ export function CaseWindow({
   const scoopablePopupRef = useRef<HTMLDivElement>(null);
   const [scoShip, setScoShip] = useState<ScoShipKey>('cobra');
   const [gravityMode, setGravityMode] = useState<'off' | 'grav' | 'nosco'>('off');
+  // Open by default: the notes are the point of taking them, and a case rarely
+  // has more than a handful.
+  const [notesCollapsed, setNotesCollapsed] = useState(false);
   const [shipHover, setShipHover] = useState(false);
   const [shipPopupOffset, setShipPopupOffset] = useState(0);
   const shipHideTimer = useRef<number | null>(null);
@@ -958,6 +925,26 @@ export function CaseWindow({
               </div>
             );
           })()}
+
+          {/* Case notes (!inject / !grab) */}
+          {caseData.injections.length > 0 && (
+            <div className="border-b border-slate-700/60 bg-amber-500/5 flex-shrink-0">
+              <button
+                onClick={() => setNotesCollapsed(c => !c)}
+                className="w-full flex items-center gap-1.5 px-3 py-1.5 text-left group"
+              >
+                <span className="text-xs font-semibold text-amber-500/80 uppercase tracking-wider flex-1">
+                  Quotes <span className="text-slate-600 normal-case">({caseData.injections.length})</span>
+                </span>
+                <ChevronDown className={`w-3 h-3 text-slate-600 group-hover:text-slate-400 transition-transform ${notesCollapsed ? '' : 'rotate-180'}`} />
+              </button>
+              {!notesCollapsed && (
+                <div className="px-3 pb-2 max-h-40 overflow-y-auto">
+                  <CaseNotes injections={caseData.injections} compact />
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Messages */}
           <div
