@@ -1145,8 +1145,11 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
                             </span>
                           )}
                           {/* oxygenStatus, not status: inactive outranks code-red
-                              in status, but the client is still on fumes. */}
-                          {caseData.oxygenStatus && isVisible && (
+                              in status, but the client is still on fumes.
+                              Shown regardless of visibility -- a hidden case has
+                              no window on screen, so this strip is the only place
+                              the code red can be seen at all. */}
+                          {caseData.oxygenStatus && (
                             <AlertTriangle className="w-3 h-3 text-red-500 animate-pulse flex-shrink-0" />
                           )}
                         </div>
