@@ -680,6 +680,23 @@ export class FuelRatsApiService {
     const jumpPattern = new RegExp(`(?:#${caseNum}\\s+(\\d+)j|(\\d+)j\\s+#${caseNum})\\b`, 'i');
     const extractJumps = (m: RegExpMatchArray) => parseInt(m[1] ?? m[2], 10);
     const caseNumPattern = new RegExp(`#${caseNum}\\b`);
+    // Standing down retracts a jump call: the rat is no longer on their way, so
+    // leaving the count up means a countdown ticking towards an arrival that is
+    // not coming. Not anchored to the case number -- these messages already
+    // belong to this case, and the call is often typed bare.
+    const standDownPattern = /\b(?:stdn|stand\s*down)\b/i;
+
+    // ...but only for someone who never got assigned. A rat who was actually put
+    // on the case has a jump count that is part of its record, and standing down
+    // does not unmake the trip. Someone who called jumps and was never assigned
+    // was only ever offering, so their count is noise once they withdraw.
+    // Identities are matched loosely because a call can come from the CMDR name
+    // or the IRC nick.
+    const assignedIdentities = new Set(
+      [...assignedRats, ...attrs.unidentifiedRats, ...Object.values(ratIrcNicks)]
+        .filter((n): n is string => Boolean(n))
+        .map(n => n.toLowerCase()),
+    );
 
     for (const msg of messages) {
       if (msg.isSystem || !msg.sender || !msg.text) continue;
@@ -690,6 +707,12 @@ export class FuelRatsApiService {
       const jumpMatch = text.match(jumpPattern);
       if (jumpMatch) {
         jumpCalls[sender] = { jumps: extractJumps(jumpMatch), text, timestamp: msg.timestamp };
+      } else if (standDownPattern.test(text) && !assignedIdentities.has(sender.toLowerCase())) {
+        // Messages are walked oldest first, so standing down clears an earlier
+        // count while a fresh call afterwards reinstates it. An else, matching
+        // the live IRC path in DispatchBoard, so a message that somehow carries
+        // both still registers the newer jump count.
+        delete jumpCalls[sender];
       }
 
       // SC distance: "#N ... X.Xly/ls/au"

@@ -836,6 +836,24 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
             ...updatedJumpCalls,
             [ircMsg.nick]: { jumps: parseInt(jumpMatch[1] ?? jumpMatch[2], 10), text: displayText, timestamp: ircMsg.timestamp },
           };
+        } else if (ircMsg.nick && /\b(?:stdn|stand\s*down)\b/i.test(displayText)) {
+          // Standing down retracts the call: they are not on their way any more,
+          // so a countdown still ticking towards their arrival is worse than
+          // showing nothing. Checked as an else so a message that somehow carries
+          // both still registers the newer jump count.
+          //
+          // Only for someone never assigned, though. An assigned rat's count is
+          // part of the case record and standing down does not unmake the trip;
+          // an unassigned caller was only offering, so it is noise once they
+          // withdraw. The nick is checked against the learned map as well, since
+          // name matching can miss.
+          const nickIsAssigned = isAssignedRat
+            || Object.values(updatedRatIrcNicks).some(n => n?.toLowerCase() === ircMsg.nick!.toLowerCase());
+          if (!nickIsAssigned && updatedJumpCalls[ircMsg.nick]) {
+            const rest = { ...updatedJumpCalls };
+            delete rest[ircMsg.nick];
+            updatedJumpCalls = rest;
+          }
         }
 
         // Detect rat status reports: fr±, wr±, sys+, inst±, bc±, fuel+
