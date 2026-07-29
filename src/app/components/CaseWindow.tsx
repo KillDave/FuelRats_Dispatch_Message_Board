@@ -221,9 +221,10 @@ export function CaseWindow({
   }, [caseData.messages, langblyEnabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Trigger flicker effect based on case status and messages
+  const lastMessageId = caseData.messages[caseData.messages.length - 1]?.id;
   useEffect(() => {
     const lastMessage = caseData.messages[caseData.messages.length - 1];
-    
+
     // For Code Red cases: flash continuously if only system messages exist
     if (caseData.status === 'code-red') {
       // Check if there are any non-system messages (excluding "Incoming Client" and disconnect/reconnect messages)
@@ -257,7 +258,14 @@ export function CaseWindow({
         setIsFlickering(false);
       }
     }
-  }, [caseData.messages, caseData.status]);
+    // Keyed on the last message's id, not on the messages array.
+    //
+    // The array's identity changes on every refetch, and an effect watching it
+    // fired the 180ms grey flash each time even when no message had arrived --
+    // so cases blinked on a timer, with no update behind it. Anything that
+    // rewrites a message in place, such as attaching a translation, also changed
+    // the identity without changing the last id, and should not flash either.
+  }, [lastMessageId, caseData.status]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Timer for case elapsed time (from case creation)
   useEffect(() => {

@@ -357,7 +357,12 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
 
             return {
               ...fetchedCase,
-              messages: [...existingCase.messages, ...newMessages],
+              // Reuse the existing array when nothing arrived. Allocating a new
+              // one every refetch changes its identity, which wakes up every
+              // effect that depends on it even though the content is unchanged.
+              messages: newMessages.length > 0
+                ? [...existingCase.messages, ...newMessages]
+                : existingCase.messages,
               scoopable: existingCase.scoopable,
               nearestScoopableStar: existingCase.nearestScoopableStar,
               scDistance: existingCase.scDistance,
