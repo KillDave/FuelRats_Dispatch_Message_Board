@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { Zap } from 'lucide-react';
 import type { Case, Message } from './DispatchBoard';
+import { compareCases } from './DispatchBoard';
 import { RatCaseCard } from './RatCaseCard';
 import { RatCaseDetail } from './RatCaseDetail';
 import { useRatAccounts, type RatAccount, type AccountCardDist, type ShipSlot } from '../hooks/useRatAccounts';
@@ -502,7 +503,7 @@ export function RatBoard({ cases, debriefMessages }: RatBoardProps) {
   const visibleCases = cases
     .filter(c => c.status !== 'closed')
     .filter(c => PLATFORM_OPTIONS.some(p => enabledPlatforms.has(p.key) && c.platform.toLowerCase().includes(p.key.toLowerCase())))
-    .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+    .sort(compareCases);
 
   // Stable keys so the fetch only re-runs when systems actually change
   const caseKey    = visibleCases.map(c => `${c.id}:${c.system}`).join('|');

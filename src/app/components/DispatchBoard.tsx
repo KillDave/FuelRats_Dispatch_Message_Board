@@ -135,6 +135,20 @@ export interface Case {
 
 const initialCases: Case[] = [];
 
+/**
+ * Oldest first, with inactive cases pushed to the end.
+ *
+ * An inactive case is parked -- the client has gone quiet or logged off -- so it
+ * should not sit between two cases someone is actively working. Age still orders
+ * within each group, so the relative order of the active cases is unchanged.
+ */
+export function compareCases(a: Case, b: Case): number {
+  const aInactive = a.status === 'inactive' ? 1 : 0;
+  const bInactive = b.status === 'inactive' ? 1 : 0;
+  if (aInactive !== bInactive) return aInactive - bInactive;
+  return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+}
+
 const isLPadStation = (type: string) => !['Outpost', 'Planetary Outpost'].includes(type);
 const isFleetCarrier = (type: string) => type === 'Fleet Carrier';
 const isColonizationStation = (type: string) =>
@@ -879,7 +893,7 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
     return exp ? `${short}-${expansionMap[exp] ?? exp}` : short;
   };
 
-  const sortedCases = [...cases].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+  const sortedCases = [...cases].sort(compareCases);
   const visibleCases = sortedCases.filter((c) => toggledCaseIds.has(c.id));
 
   const addMessage = (caseId: string, text: string, channel?: string, original?: string) => {
@@ -1032,7 +1046,9 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
               <h1 className="text-2xl font-bold text-orange-500">FuelRats Dispatch Board</h1>
               <p className="text-sm text-slate-400 mt-1">
                 Active Cases: {cases.length} | Viewing: {visibleCases.length} | Code Red:{' '}
-                {cases.filter((c) => c.status === 'code-red').length}
+                {/* oxygenStatus, not status: an inactive case can also be a code
+                    red, and status only carries one of the two. */}
+                {cases.filter((c) => c.oxygenStatus).length}
               </p>
             </div>
             <HeaderMenu
@@ -1086,11 +1102,20 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
               {sortedCases.map((caseData) => {
                 const isVisible = toggledCaseIds.has(caseData.id);
                 const hasUnread = unreadCases.has(caseData.id);
+                // Parked cases are greyed back so the eye skips them, but not when
+                // there is something unread -- a client saying anything at all is
+                // the point at which the case stops being parked.
+                const dimmed = caseData.status === 'inactive' && !hasUnread;
                 return (
                   <button
                     key={caseData.id}
                     onClick={() => toggleCase(caseData.id)}
+                    // Inline, because the class strings below also set opacity and
+                    // Tailwind gives no ordering guarantee between two of them.
+                    style={dimmed ? { opacity: 0.45 } : undefined}
                     className={`relative w-full px-4 py-3 border-b border-slate-800 hover:bg-slate-800 transition-colors text-left ${
+                      dimmed ? 'grayscale' : ''
+                    } ${
                       isVisible ? 'bg-slate-850' : 'bg-slate-900 opacity-60'
                     } ${hasUnread && isVisible ? 'animate-pulse bg-orange-500/10 border-l-4 border-l-orange-500' : ''} ${hasUnread && !isVisible ? 'animate-pulse bg-red-500/20 border-l-4 border-l-red-500 opacity-100' : ''}`}
                   >
@@ -1114,7 +1139,14 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
                           <span className={`text-sm font-semibold truncate ${hasUnread && !isVisible ? 'text-white' : isVisible ? 'text-white' : 'text-slate-500'}`}>
                             CMDR {caseData.clientName}
                           </span>
-                          {caseData.status === 'code-red' && isVisible && (
+                          {caseData.status === 'inactive' && (
+                            <span className="text-[10px] font-semibold tracking-wider text-slate-400 border border-slate-600 rounded px-1 flex-shrink-0">
+                              INACTIVE
+                            </span>
+                          )}
+                          {/* oxygenStatus, not status: inactive outranks code-red
+                              in status, but the client is still on fumes. */}
+                          {caseData.oxygenStatus && isVisible && (
                             <AlertTriangle className="w-3 h-3 text-red-500 animate-pulse flex-shrink-0" />
                           )}
                         </div>

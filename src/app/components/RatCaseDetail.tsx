@@ -181,6 +181,11 @@ export function RatCaseDetail({ caseData, isClosed = false, onClose }: RatCaseDe
                 <AlertTriangle className="w-4 h-4" /> CODE RED
               </span>
             )}
+            {caseData.status === 'inactive' && (
+              <span className="text-xs font-semibold text-slate-300 border border-slate-500/60 bg-slate-500/20 rounded px-1.5 py-0.5">
+                INACTIVE
+              </span>
+            )}
             {!caseData.clientInChannel && (
               <span className="text-xs font-semibold text-red-300 border border-red-500/60 bg-red-500/10 rounded px-1.5 py-0.5">
                 DISCONNECTED

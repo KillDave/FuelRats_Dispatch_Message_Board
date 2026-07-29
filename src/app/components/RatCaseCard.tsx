@@ -45,9 +45,13 @@ export function RatCaseCard({ caseData, onSelect, accountDistances = [], onPlotJ
   const secs = elapsed % 60;
   const elapsedStr = `${mins}:${secs.toString().padStart(2, '0')}`;
 
+  const inactive = caseData.status === 'inactive';
+
   return (
     <button
-      className={`w-full bg-slate-900/80 border border-slate-700/60 border-l-4 rounded-lg overflow-hidden text-left hover:bg-slate-800/60 transition-colors ${borderByStatus[caseData.status] ?? 'border-l-slate-600'}`}
+      // Greyed back rather than hidden: a parked case can come back, and it is
+      // still worth being able to see it and click into it.
+      className={`w-full bg-slate-900/80 border border-slate-700/60 border-l-4 rounded-lg overflow-hidden text-left hover:bg-slate-800/60 transition-colors ${borderByStatus[caseData.status] ?? 'border-l-slate-600'} ${inactive ? 'opacity-50 grayscale hover:opacity-100' : ''}`}
       onClick={onSelect}
     >
       {/* Main row */}
@@ -62,6 +66,11 @@ export function RatCaseCard({ caseData, onSelect, accountDistances = [], onPlotJ
             {caseData.oxygenStatus && (
               <span className="flex items-center gap-1 text-xs text-red-400 font-bold animate-pulse">
                 <AlertTriangle className="w-3 h-3" /> CODE RED
+              </span>
+            )}
+            {caseData.status === 'inactive' && (
+              <span className="text-xs font-semibold text-slate-300 border border-slate-500/60 bg-slate-500/20 rounded px-1.5 py-0.5">
+                INACTIVE
               </span>
             )}
             <span className="text-xs text-slate-500 border border-slate-600 rounded px-1.5 py-0.5">

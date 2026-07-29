@@ -500,14 +500,23 @@ export class FuelRatsApiService {
   private transformRescue(rescue: ApiRescue, ratMap: Map<string, string>): Case {
     const attrs = rescue.attributes;
     
-    // Determine status based on API data
+    // Determine status based on API data.
+    //
+    // Inactive is checked first because it is the only one of these a dispatcher
+    // sets deliberately, and it outranks the rest: a case that has been parked is
+    // parked whether or not rats are on it or the client is on fumes. Checking it
+    // last, as this used to, meant it was almost never reached -- cases usually go
+    // inactive after rats were assigned, and there is a live case right now that
+    // is inactive *and* codeRed, which reported 'code-red' and sorted to the top
+    // of the board flashing. The code red itself is not lost: oxygenStatus below
+    // is set from attrs.codeRed independently of this.
     let status: CaseStatus = 'open';
-    if (attrs.codeRed) {
+    if (attrs.status === 'inactive') {
+      status = 'inactive';
+    } else if (attrs.codeRed) {
       status = 'code-red';
     } else if (rescue.relationships.rats.data.length > 0) {
       status = 'assigned';
-    } else if (attrs.status === 'inactive') {
-      status = 'inactive';
     }
 
     // Get assigned rat names

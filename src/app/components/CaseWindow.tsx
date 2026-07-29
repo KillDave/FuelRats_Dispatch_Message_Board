@@ -648,8 +648,16 @@ export function CaseWindow({
           <div className="flex items-center gap-2">
             <User className="w-4 h-4 text-slate-400 flex-shrink-0" />
             <span className="font-semibold text-white truncate">CMDR {caseData.clientName}</span>
-            {caseData.status === 'code-red' && (
+            {/* Driven by oxygenStatus rather than status, so a case that is both
+                inactive and code red still shows it -- status can only hold one
+                of the two and inactive wins. */}
+            {caseData.oxygenStatus && (
               <AlertTriangle className="w-4 h-4 text-red-500 animate-pulse flex-shrink-0" />
+            )}
+            {caseData.status === 'inactive' && (
+              <span className="text-xs font-semibold text-slate-300 border border-slate-500/60 bg-slate-500/20 rounded px-1.5 py-0.5 flex-shrink-0">
+                INACTIVE
+              </span>
             )}
           </div>
           <div className="flex flex-col mt-1 gap-0.5">
