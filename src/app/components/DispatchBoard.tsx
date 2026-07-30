@@ -363,6 +363,13 @@ function HeaderMenu({
               </button>
             </>
           )}
+          {/* Costs nothing on screen until the menu is opened, which is where
+              someone goes when they want to know what they are running.
+              Selectable so it can be pasted into a bug report. */}
+          <div className="my-1 border-t border-slate-700/60" />
+          <p className="px-3 pb-0.5 text-[10px] text-slate-600 select-text cursor-text">
+            v{__APP_VERSION__}
+          </p>
         </div>
       )}
     </div>
