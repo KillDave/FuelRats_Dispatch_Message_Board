@@ -1,4 +1,4 @@
-import { Case, CaseStatus, Message } from '../components/DispatchBoard';
+import { Case, CaseStatus, Injection, Message } from '../components/DispatchBoard';
 import { authService } from './authService';
 
 interface ApiQuote {
@@ -109,6 +109,18 @@ interface ApiResponse {
 // FuelRats uses array format: [eventType, statusCode, data, meta]
 type WSMessage = [string, number, any, any];
 
+/**
+ * Temporary: set localStorage fr_debug = "1" to trace where a status change is
+ * getting lost between the API and the board. Off by default so it cannot spam.
+ */
+export function apiDebug(): boolean {
+  try {
+    return localStorage.getItem('fr_debug') === '1';
+  } catch {
+    return false;
+  }
+}
+
 
 export class FuelRatsApiService {
   private wsUrl = 'wss://api.fuelrats.com';
@@ -124,6 +136,26 @@ export class FuelRatsApiService {
   private maxWsFailures: number = 3;
   private pollingInterval: number | null = null;
   private pollingDelay: number = 10000; // 10 seconds
+  /**
+   * Periodic full refetch that runs *while the WebSocket is connected*.
+   *
+   * Without it the board's freshness depends on receiving every single event:
+   * there was no reconcile unless the socket had already failed maxWsFailures
+   * times, so one dropped fuelrats.rescueupdate left a case stale indefinitely.
+   * That is how a case set inactive kept rendering as a flashing code red until
+   * someone reloaded the page. Events still drive the fast path; this only bounds
+   * how long a miss can persist.
+   *
+   * Matched to the polling fallback at 10s. It was 30s, which is long enough that
+   * watching for a change to land reads as "nothing happened until I reloaded".
+   * Socket events do arrive and are the fast path -- verified against the live API
+   * -- but this is the part that is guaranteed, so it has to be quick enough that
+   * a missed event is not mistaken for a broken board.
+   *
+   * 360 requests/hour against a 3600/hour rate limit.
+   */
+  private reconcileInterval: number | null = null;
+  private reconcileDelay: number = 10000;
   
   // Callbacks
   private onUpdateCallback: ((cases: Case[]) => void) | null = null;
@@ -182,6 +214,7 @@ export class FuelRatsApiService {
         console.log('[FuelRats WS] Connected');
         this.isConnecting = false;
         this.notifyStatusChange('connected');
+        this.startReconcile();
       };
 
       this.ws.onmessage = (event) => {
@@ -204,6 +237,7 @@ export class FuelRatsApiService {
         console.log(`[FuelRats WS] Closed — code ${event.code} (${this.getCloseCodeDescription(event.code)})`);
         this.isConnecting = false;
         this.ws = null;
+        this.stopReconcile();
 
         if (this.pollingInterval) {
           clearInterval(this.pollingInterval);
@@ -282,6 +316,15 @@ export class FuelRatsApiService {
    * FuelRats format: [eventType, statusCode, data, meta]
    */
   private handleWebSocketMessage(message: WSMessage): void {
+    // Two different array shapes arrive on this socket, which is why the names
+    // here only half fit. Replies to our own requests are
+    //   [state, httpStatus, body]
+    // but broadcast events are
+    //   [event, senderUserId, resourceId, document]
+    // so for an event `statusCode` is a user UUID, and `eventData` is the
+    // resource id rather than a payload. That is what fetchRescueById wants, so
+    // the rescue branch below is correct -- but do not read `statusCode` as a
+    // status for events, and do not expect `eventData` to be an object.
     const [eventType, statusCode, eventData] = message;
 
     if (statusCode === 200) {
@@ -301,6 +344,8 @@ export class FuelRatsApiService {
       this.requestRescues();
       return;
     }
+
+    if (apiDebug()) console.log('[ws]', eventType, typeof eventData === 'string' ? eventData : '(object)');
 
     if (eventType === 'fuelrats.rescuecreate' || eventType === 'fuelrats.rescueupdate') {
       this.fetchRescueById(eventData);
@@ -358,7 +403,10 @@ export class FuelRatsApiService {
     try {
       const headers: HeadersInit = { 'Accept': 'application/json' };
       if (this.apiKey) headers['Authorization'] = `Bearer ${this.apiKey}`;
-      const response = await fetch(`${this.apiUrl}/${id}`, { headers });
+      // no-store: the API sends an ETag but no max-age, which lets the browser
+      // apply heuristic freshness and hand back a cached body. For a poll whose
+      // whole job is to notice change, that is the one thing it must not do.
+      const response = await fetch(`${this.apiUrl}/${id}`, { headers, cache: 'no-store' });
       if (!response.ok) {
         if (response.status === 404) {
           // Rescue gone — remove from cache
@@ -445,7 +493,7 @@ export class FuelRatsApiService {
       const headers: HeadersInit = { 'Accept': 'application/json' };
       if (this.apiKey) headers['Authorization'] = `Bearer ${this.apiKey}`;
 
-      const response = await fetch(`${this.apiUrl}?${params.toString()}`, { headers });
+      const response = await fetch(`${this.apiUrl}?${params.toString()}`, { headers, cache: 'no-store' });
 
       if (!response.ok) {
         throw new Error(`API request failed: ${response.status}`);
@@ -500,14 +548,23 @@ export class FuelRatsApiService {
   private transformRescue(rescue: ApiRescue, ratMap: Map<string, string>): Case {
     const attrs = rescue.attributes;
     
-    // Determine status based on API data
+    // Determine status based on API data.
+    //
+    // Inactive is checked first because it is the only one of these a dispatcher
+    // sets deliberately, and it outranks the rest: a case that has been parked is
+    // parked whether or not rats are on it or the client is on fumes. Checking it
+    // last, as this used to, meant it was almost never reached -- cases usually go
+    // inactive after rats were assigned, and there is a live case right now that
+    // is inactive *and* codeRed, which reported 'code-red' and sorted to the top
+    // of the board flashing. The code red itself is not lost: oxygenStatus below
+    // is set from attrs.codeRed independently of this.
     let status: CaseStatus = 'open';
-    if (attrs.codeRed) {
+    if (attrs.status === 'inactive') {
+      status = 'inactive';
+    } else if (attrs.codeRed) {
       status = 'code-red';
     } else if (rescue.relationships.rats.data.length > 0) {
       status = 'assigned';
-    } else if (attrs.status === 'inactive') {
-      status = 'inactive';
     }
 
     // Get assigned rat names
@@ -646,6 +703,23 @@ export class FuelRatsApiService {
     const jumpPattern = new RegExp(`(?:#${caseNum}\\s+(\\d+)j|(\\d+)j\\s+#${caseNum})\\b`, 'i');
     const extractJumps = (m: RegExpMatchArray) => parseInt(m[1] ?? m[2], 10);
     const caseNumPattern = new RegExp(`#${caseNum}\\b`);
+    // Standing down retracts a jump call: the rat is no longer on their way, so
+    // leaving the count up means a countdown ticking towards an arrival that is
+    // not coming. Not anchored to the case number -- these messages already
+    // belong to this case, and the call is often typed bare.
+    const standDownPattern = /\b(?:stdn|stand\s*down)\b/i;
+
+    // ...but only for someone who never got assigned. A rat who was actually put
+    // on the case has a jump count that is part of its record, and standing down
+    // does not unmake the trip. Someone who called jumps and was never assigned
+    // was only ever offering, so their count is noise once they withdraw.
+    // Identities are matched loosely because a call can come from the CMDR name
+    // or the IRC nick.
+    const assignedIdentities = new Set(
+      [...assignedRats, ...attrs.unidentifiedRats, ...Object.values(ratIrcNicks)]
+        .filter((n): n is string => Boolean(n))
+        .map(n => n.toLowerCase()),
+    );
 
     for (const msg of messages) {
       if (msg.isSystem || !msg.sender || !msg.text) continue;
@@ -656,6 +730,12 @@ export class FuelRatsApiService {
       const jumpMatch = text.match(jumpPattern);
       if (jumpMatch) {
         jumpCalls[sender] = { jumps: extractJumps(jumpMatch), text, timestamp: msg.timestamp };
+      } else if (standDownPattern.test(text) && !assignedIdentities.has(sender.toLowerCase())) {
+        // Messages are walked oldest first, so standing down clears an earlier
+        // count while a fresh call afterwards reinstates it. An else, matching
+        // the live IRC path in DispatchBoard, so a message that somehow carries
+        // both still registers the newer jump count.
+        delete jumpCalls[sender];
       }
 
       // SC distance: "#N ... X.Xly/ls/au"
@@ -705,6 +785,23 @@ export class FuelRatsApiService {
     );
     const clientInChannel = lastPresenceQuote?.message !== 'Client left the rescue channel';
 
+    // Quotes serve double duty: the chat log above is derived from them, but they
+    // are also the case's own record -- the same list the rescue page shows under
+    // "Quotes". Everything is kept, because the author only says who recorded a
+    // line, not how useful it is: MechaSqueak is the author of every rat call-in
+    // (`#7 1j`, `#7 rdy`, `#7 fuel+`), which is the rat action timeline, while a
+    // dispatcher is the author of both !inject notes and !grab'd client lines.
+    // Kept raw -- the relay parsing applied to the chat log rewrites the author,
+    // which for a quote would misattribute it.
+    const injections: Injection[] = attrs.quotes.map((quote, index) => ({
+      id: `${caseId}-inj-${index}`,
+      author: quote.author,
+      text: quote.message,
+      createdAt: new Date(quote.createdAt),
+      isBot: quote.author.includes('[BOT]'),
+      lastAuthor: quote.lastAuthor && quote.lastAuthor !== quote.author ? quote.lastAuthor : undefined,
+    }));
+
     return {
       id: caseId,
       apiId: rescue.id, // Store the API's UUID for WebSocket event matching
@@ -715,6 +812,7 @@ export class FuelRatsApiService {
       language: attrs.clientLanguage || undefined,
       status,
       messages,
+      injections,
       assignedRats,
       ratIrcNicks,
       oxygenStatus: attrs.codeRed ? 'CRITICAL' : undefined,
@@ -744,6 +842,11 @@ export class FuelRatsApiService {
       legacy: 'Legacy'
     };
 
+    // The spec has platform and expansion as nullable even though they are typed
+    // as strings here, and the fallback used to call .toUpperCase() directly --
+    // one null would throw inside transformRescue and take the whole poll with it.
+    if (!platform) return 'Unknown';
+
     const platformStr = platformMap[platform] || platform.toUpperCase();
 
     // PlayStation and Xbox don't have meaningful expansion variants — just show the platform
@@ -751,6 +854,7 @@ export class FuelRatsApiService {
       return platformStr;
     }
 
+    if (!expansion) return platformStr;
     const expansionStr = expansionMap[expansion] || expansion;
     return `${platformStr} - ${expansionStr}`;
   }
@@ -771,6 +875,8 @@ export class FuelRatsApiService {
       this.pollingInterval = null;
     }
 
+    this.stopReconcile();
+
     if (this.ws) {
       this.ws.close(1000, 'Client disconnect');
       this.ws = null;
@@ -787,8 +893,49 @@ export class FuelRatsApiService {
 
     console.log('[FuelRats API] Starting REST polling fallback');
     this.notifyStatusChange('connected');
+    // The fallback poll supersedes the reconcile -- it refetches more often.
+    this.stopReconcile();
     this.fetchAndNotify();
     this.pollingInterval = window.setInterval(() => this.fetchAndNotify(), this.pollingDelay);
+  }
+
+  private startReconcile(): void {
+    if (this.reconcileInterval || this.pollingInterval) return;
+    this.reconcileInterval = window.setInterval(() => this.reconcile(), this.reconcileDelay);
+  }
+
+  private stopReconcile(): void {
+    if (this.reconcileInterval) {
+      clearInterval(this.reconcileInterval);
+      this.reconcileInterval = null;
+    }
+  }
+
+  /**
+   * Refetch every open rescue and replace the cache.
+   *
+   * The cache has to be rebuilt, not just reported: fetchAndNotify hands the
+   * fresh list to the callback but leaves activeCases untouched, so a later
+   * fetchRescueById -- which notifies from activeCases -- would undo whatever
+   * this corrected. Local state such as messages is preserved by the merge in
+   * DispatchBoard, so replacing wholesale here is safe.
+   */
+  private async reconcile(): Promise<void> {
+    if (!this.isConnected()) {
+      if (apiDebug()) console.log('[reconcile] skipped — socket not open');
+      return;
+    }
+    try {
+      const cases = await this.fetchActiveRescues();
+      this.activeCases.clear();
+      cases.forEach(c => this.activeCases.set(c.id, c));
+      if (apiDebug()) {
+        console.log('[reconcile]', cases.map(c => `${c.id}=${c.status}`).join('  '));
+      }
+      if (this.onUpdateCallback) this.onUpdateCallback(cases);
+    } catch (error) {
+      console.error('[FuelRats API] Reconcile failed:', error);
+    }
   }
 
   private async fetchAndNotify(): Promise<void> {

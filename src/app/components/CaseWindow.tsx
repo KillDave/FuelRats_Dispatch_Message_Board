@@ -2,6 +2,8 @@ import { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import disconnectIcon from './image/Disconnect_Icon.png';
 import type { Case, CaseStatus } from './DispatchBoard';
 import { CopyableSystem } from './CopyableSystem';
+import { CaseNotes } from './CaseNotes';
+import { distanceToSeconds, SCO_SHIPS, type ScoShipKey } from '../services/scTime';
 import { translateText, toDeepLTargetLang, getDeepLApiKey, setDeepLApiKey } from '../services/translationService';
 import { langblyTranslate, toLangblyTargetLang, getLangblyApiKey, setLangblyApiKey } from '../services/langblyService';
 import { Button } from '@/app/components/ui/button';
@@ -60,46 +62,8 @@ const statusBgColors = {
   closed: 'bg-slate-500/10',
 };
 
-// --- Supercruise time calculation (ported from SwiftSqueak/NumberFormatter.swift) ---
-const SC_ACCEL_RATE = 0.244343173;
-const SC_ACCEL_MIDPOINT = 24.3043969;
-const SC_VERTICAL_OFFSET = -90.9763924;
-
-function scSpeed(t: number, maxSpeed: number): number {
-  return maxSpeed / (1 + Math.exp(-SC_ACCEL_RATE * (t - SC_ACCEL_MIDPOINT))) + SC_VERTICAL_OFFSET;
-}
-
-function scDistanceTravelled(time: number, maxSpeed: number, steps = 200): number {
-  const dt = time / steps;
-  let dist = 0;
-  for (let i = 0; i < steps; i++) {
-    dist += 0.5 * (Math.max(0, scSpeed(i * dt, maxSpeed)) + Math.max(0, scSpeed((i + 1) * dt, maxSpeed))) * dt;
-  }
-  return dist;
-}
-
-function distanceToSeconds(ls: number, scoMaxSpeed?: number): number {
-  if (scoMaxSpeed !== undefined) {
-    let low = 0, high = 400_000;
-    while (high - low > 0.5) {
-      const mid = (low + high) / 2;
-      if (scDistanceTravelled(mid, scoMaxSpeed) < ls) low = mid; else high = mid;
-    }
-    return (low + high) / 2;
-  }
-  if (ls < 100_000) return 8.9034 * Math.pow(ls, 0.3292);
-  if (ls < 1_907_087) return -8e-23 * ls ** 4 + 4e-16 * ls ** 3 - 8e-10 * ls ** 2 + 0.0014 * ls + 264.79;
-  return (ls - 5_265_389.609) / 2001 + 3412;
-}
-
-
-const SCO_SHIPS = [
-  { key: 'cobra', label: 'Cobra Mk V', speed: 7000 },
-  { key: 'mandalay', label: 'Mandalay', speed: 4200 },
-  { key: 'caspian', label: 'Caspian', speed: 2900 },
-] as const;
-type ScoShipKey = typeof SCO_SHIPS[number]['key'];
-// ---------------------------------------------------------------------------------
+// Supercruise timing lives in services/scTime.ts so rat mode shows the same
+// numbers for the same case.
 
 export function CaseWindow({
   caseData,
@@ -146,6 +110,9 @@ export function CaseWindow({
   const scoopablePopupRef = useRef<HTMLDivElement>(null);
   const [scoShip, setScoShip] = useState<ScoShipKey>('cobra');
   const [gravityMode, setGravityMode] = useState<'off' | 'grav' | 'nosco'>('off');
+  // Open by default: the notes are the point of taking them, and a case rarely
+  // has more than a handful.
+  const [notesCollapsed, setNotesCollapsed] = useState(false);
   const [shipHover, setShipHover] = useState(false);
   const [shipPopupOffset, setShipPopupOffset] = useState(0);
   const shipHideTimer = useRef<number | null>(null);
@@ -254,9 +221,10 @@ export function CaseWindow({
   }, [caseData.messages, langblyEnabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Trigger flicker effect based on case status and messages
+  const lastMessageId = caseData.messages[caseData.messages.length - 1]?.id;
   useEffect(() => {
     const lastMessage = caseData.messages[caseData.messages.length - 1];
-    
+
     // For Code Red cases: flash continuously if only system messages exist
     if (caseData.status === 'code-red') {
       // Check if there are any non-system messages (excluding "Incoming Client" and disconnect/reconnect messages)
@@ -290,7 +258,14 @@ export function CaseWindow({
         setIsFlickering(false);
       }
     }
-  }, [caseData.messages, caseData.status]);
+    // Keyed on the last message's id, not on the messages array.
+    //
+    // The array's identity changes on every refetch, and an effect watching it
+    // fired the 180ms grey flash each time even when no message had arrived --
+    // so cases blinked on a timer, with no update behind it. Anything that
+    // rewrites a message in place, such as attaching a translation, also changed
+    // the identity without changing the last id, and should not flash either.
+  }, [lastMessageId, caseData.status]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Timer for case elapsed time (from case creation)
   useEffect(() => {
@@ -681,8 +656,16 @@ export function CaseWindow({
           <div className="flex items-center gap-2">
             <User className="w-4 h-4 text-slate-400 flex-shrink-0" />
             <span className="font-semibold text-white truncate">CMDR {caseData.clientName}</span>
-            {caseData.status === 'code-red' && (
+            {/* Driven by oxygenStatus rather than status, so a case that is both
+                inactive and code red still shows it -- status can only hold one
+                of the two and inactive wins. */}
+            {caseData.oxygenStatus && (
               <AlertTriangle className="w-4 h-4 text-red-500 animate-pulse flex-shrink-0" />
+            )}
+            {caseData.status === 'inactive' && (
+              <span className="text-xs font-semibold text-slate-300 border border-slate-500/60 bg-slate-500/20 rounded px-1.5 py-0.5 flex-shrink-0">
+                INACTIVE
+              </span>
             )}
           </div>
           <div className="flex flex-col mt-1 gap-0.5">
@@ -831,8 +814,15 @@ export function CaseWindow({
 
                 return (
                   <div key={rat} className={`flex items-center gap-2 text-xs rounded px-1 ${fueled ? 'bg-green-500/20' : ''}`}>
-                    <span className={`w-24 truncate flex-shrink-0 ${fueled ? 'text-green-300' : 'text-slate-400'}`} title={rat}>{nick}</span>
-                    <div className="flex items-center gap-1">
+                    {/* The nick gives up space, the badges never do. It used to be
+                        a fixed w-24 that could not shrink while the badges could,
+                        so in a narrow column -- several cases open at once -- the
+                        stages were pushed off the edge, which is the one part of
+                        this row that has to stay readable. min-w-0 is what actually
+                        lets it shrink; flex items refuse to go below their content
+                        width without it. */}
+                    <span className={`flex-1 min-w-0 truncate ${fueled ? 'text-green-300' : 'text-slate-400'}`} title={rat}>{nick}</span>
+                    <div className="flex items-center gap-1 flex-shrink-0">
                       {stages.map(({ key, label }, idx) => {
                         const val = prog[key];
                         const explicitPositive = val === '+' || val === true;
@@ -958,6 +948,26 @@ export function CaseWindow({
               </div>
             );
           })()}
+
+          {/* Case notes (!inject / !grab) */}
+          {caseData.injections.length > 0 && (
+            <div className="border-b border-slate-700/60 bg-amber-500/5 flex-shrink-0">
+              <button
+                onClick={() => setNotesCollapsed(c => !c)}
+                className="w-full flex items-center gap-1.5 px-3 py-1.5 text-left group"
+              >
+                <span className="text-xs font-semibold text-amber-500/80 uppercase tracking-wider flex-1">
+                  Quotes <span className="text-slate-600 normal-case">({caseData.injections.length})</span>
+                </span>
+                <ChevronDown className={`w-3 h-3 text-slate-600 group-hover:text-slate-400 transition-transform ${notesCollapsed ? '' : 'rotate-180'}`} />
+              </button>
+              {!notesCollapsed && (
+                <div className="px-3 pb-2 max-h-40 overflow-y-auto">
+                  <CaseNotes injections={caseData.injections} compact />
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Messages */}
           <div

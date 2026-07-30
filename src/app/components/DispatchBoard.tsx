@@ -4,8 +4,13 @@ import { RatBoard } from './RatBoard';
 import { MessageEditorPage } from './MessageEditorPage';
 import { CopyableSystem } from './CopyableSystem';
 import { Button } from '@/app/components/ui/button';
-import { Eye, EyeOff, Sidebar, User, MapPin, AlertTriangle, Clock, LogOut, Plus, Shield, ChevronDown, MessageSquare, Settings } from 'lucide-react';
-import { fuelRatsApi } from '../services/fuelRatsApi';
+import { Eye, EyeOff, Sidebar, User, MapPin, AlertTriangle, Clock, LogOut, Plus, Shield, ChevronDown, MessageSquare, Settings, Bell } from 'lucide-react';
+import {
+  ALERT_PLATFORMS, alertNewCase, desktopPermission, loadAlertSettings,
+  requestDesktopPermission, saveAlertSettings, testAlert,
+  type AlertSettings,
+} from '../services/alertService';
+import { fuelRatsApi, apiDebug } from '../services/fuelRatsApi';
 import { ircWebSocket, IRCMessage, IRCConnectionStatus } from '../services/ircWebSocket';
 import { IRCConnectionPanel } from './IRCConnectionPanel';
 import fuelRatsLogo from './image/TransparentBackgroundRatto.png';
@@ -79,6 +84,28 @@ export interface Message {
   translation?: string; // Translated text attached to the original message
 }
 
+/**
+ * A note attached to the case with `!inject` or `!grab`, carried by the API as a
+ * "quote". These are the dispatcher's curated record of what is actually known
+ * about a rescue -- where the client is sitting, which landmark they are near --
+ * as distinct from the live chat they were pieced together from.
+ */
+export interface Injection {
+  id: string;
+  author: string;
+  text: string;
+  createdAt: Date;
+  /**
+   * Recorded by a bot rather than typed by a person. MechaSqueak records the rat
+   * call-ins and RatMama the opening signal; a dispatcher's own !inject and
+   * !grab entries are the ones worth reading first, so these are dimmed rather
+   * than dropped.
+   */
+  isBot?: boolean;
+  /** Set only when the note was later edited by someone other than its author. */
+  lastAuthor?: string;
+}
+
 export interface Case {
   id: string;
   apiId?: string; // The API's internal UUID for this rescue
@@ -89,6 +116,8 @@ export interface Case {
   language?: string;
   status: CaseStatus;
   messages: Message[];
+  /** Case notes from `!inject`/`!grab`, kept apart from the chat log. */
+  injections: Injection[];
   assignedRats: string[];
   ratIrcNicks: Record<string, string>; // CMDR name → IRC nick, derived from relay messages
   oxygenStatus?: string;
@@ -110,6 +139,20 @@ export interface Case {
 }
 
 const initialCases: Case[] = [];
+
+/**
+ * Oldest first, with inactive cases pushed to the end.
+ *
+ * An inactive case is parked -- the client has gone quiet or logged off -- so it
+ * should not sit between two cases someone is actively working. Age still orders
+ * within each group, so the relative order of the active cases is unchanged.
+ */
+export function compareCases(a: Case, b: Case): number {
+  const aInactive = a.status === 'inactive' ? 1 : 0;
+  const bInactive = b.status === 'inactive' ? 1 : 0;
+  if (aInactive !== bInactive) return aInactive - bInactive;
+  return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+}
 
 const isLPadStation = (type: string) => !['Outpost', 'Planetary Outpost'].includes(type);
 const isFleetCarrier = (type: string) => type === 'Fleet Carrier';
@@ -137,16 +180,116 @@ function loadButtonGroups(): QuickMessageGroup[] {
   return DEFAULT_BUTTON_GROUPS;
 }
 
+/** Checkbox row used by the alert settings below. */
+function AlertToggle({
+  label,
+  checked,
+  onChange,
+  hint,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (next: boolean) => void;
+  hint?: string;
+}) {
+  return (
+    <label className="flex items-center gap-2 px-3 py-1 text-xs text-slate-300 hover:bg-slate-700/50 rounded cursor-pointer">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={e => onChange(e.target.checked)}
+        className="accent-orange-500"
+      />
+      <span className="flex-1">{label}</span>
+      {hint && <span className="text-slate-600">{hint}</span>}
+    </label>
+  );
+}
+
+function AlertSettingsMenu({
+  settings,
+  onChange,
+}: {
+  settings: AlertSettings;
+  onChange: (next: AlertSettings) => void;
+}) {
+  const [permission, setPermission] = React.useState(desktopPermission());
+
+  const setDesktop = async (on: boolean) => {
+    // Asked for at the moment it is switched on: a permission prompt on page
+    // load, before anyone has asked for notifications, gets dismissed reflexively
+    // and Chrome then refuses to ask again.
+    if (on) {
+      const granted = await requestDesktopPermission();
+      setPermission(desktopPermission());
+      if (!granted) return; // leave the toggle off rather than lie about it
+    }
+    onChange({ ...settings, desktop: on });
+  };
+
+  return (
+    <>
+      <div className="px-3 pt-1.5 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+        New case alerts
+      </div>
+      <AlertToggle
+        label="Windows notification"
+        checked={settings.desktop}
+        onChange={on => void setDesktop(on)}
+        hint={
+          permission === 'unsupported' ? 'n/a'
+          : permission === 'denied'    ? 'blocked'
+          : undefined
+        }
+      />
+      {permission === 'denied' && (
+        <p className="px-3 pb-1 text-[10px] text-slate-600 leading-snug max-w-56">
+          Blocked for this site — allow notifications in the browser's address-bar
+          site settings, then re-enable here.
+        </p>
+      )}
+      <AlertToggle
+        label="Sound"
+        checked={settings.sound}
+        onChange={on => onChange({ ...settings, sound: on })}
+      />
+      <div className="px-3 pt-1.5 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+        Alert on platform
+      </div>
+      {ALERT_PLATFORMS.map(({ key, label }) => (
+        <AlertToggle
+          key={key}
+          label={label}
+          checked={settings.platforms[key]}
+          onChange={on => onChange({ ...settings, platforms: { ...settings.platforms, [key]: on } })}
+        />
+      ))}
+      <button
+        onClick={() => testAlert(settings)}
+        disabled={!settings.desktop && !settings.sound}
+        className="flex items-center gap-2 w-full text-left px-3 py-1.5 rounded text-xs text-slate-300 hover:bg-slate-700/50 disabled:text-slate-600 disabled:hover:bg-transparent transition-colors"
+      >
+        <Bell className="w-3 h-3" />
+        Test alert
+      </button>
+    </>
+  );
+}
+
 function HeaderMenu({
   view,
   onSetView,
   onAddCase,
   onLogout,
+  alertSettings,
+  onAlertSettingsChange,
 }: {
   view: string;
   onSetView: (v: 'board' | 'rat' | 'editor') => void;
   onAddCase: () => void;
   onLogout?: () => void;
+  alertSettings: AlertSettings;
+  onAlertSettingsChange: (next: AlertSettings) => void;
 }) {
   const [open, setOpen] = React.useState(false);
   const ref = React.useRef<HTMLDivElement>(null);
@@ -191,6 +334,8 @@ function HeaderMenu({
             <Plus className="w-3 h-3" />
             Add Case
           </button>
+          <div className="my-1 border-t border-slate-700/60" />
+          <AlertSettingsMenu settings={alertSettings} onChange={onAlertSettingsChange} />
           <div className="my-1 border-t border-slate-700/60" />
           <button
             onClick={() => { window.location.hash = '#deepl'; setOpen(false); }}
@@ -237,6 +382,15 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
   const [isLoadingApi, setIsLoadingApi] = useState(false);
   const [, setRateLimitRemaining] = useState(0);
   const [, setSecondsToReset] = useState(0);
+  const [alertSettings, setAlertSettings] = useState<AlertSettings>(loadAlertSettings);
+  /** Cases already alerted for, so a re-render or refetch cannot ping twice. */
+  const alertedRef = useRef<Set<string>>(new Set());
+  /**
+   * Whether the first batch of cases has been absorbed. Every case is "new" on
+   * load, and firing for all of them would mean a burst of notifications for
+   * rescues that are already underway.
+   */
+  const alertsPrimedRef = useRef(false);
   const seenCaseIdsRef = useRef<Set<string>>(
     new Set(initialCases.map((c) => c.id))
   ); // Track which cases we've already seen to avoid flashing on every poll
@@ -319,7 +473,12 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
 
             return {
               ...fetchedCase,
-              messages: [...existingCase.messages, ...newMessages],
+              // Reuse the existing array when nothing arrived. Allocating a new
+              // one every refetch changes its identity, which wakes up every
+              // effect that depends on it even though the content is unchanged.
+              messages: newMessages.length > 0
+                ? [...existingCase.messages, ...newMessages]
+                : existingCase.messages,
               scoopable: existingCase.scoopable,
               nearestScoopableStar: existingCase.nearestScoopableStar,
               scDistance: existingCase.scDistance,
@@ -350,6 +509,13 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
         prevCases
           .filter((c) => !fetchedIds.has(c.id))
           .forEach((c) => seenCaseIdsRef.current.delete(c.id));
+
+        if (apiDebug()) {
+          console.log(
+            '[merge]  in:', fetchedCases.map(c => `${c.id}=${c.status}`).join(' '),
+            '\n[merge] out:', updatedCases.map(c => `${c.id}=${c.status}`).join(' '),
+          );
+        }
 
         return updatedCases;
       });
@@ -793,6 +959,24 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
             ...updatedJumpCalls,
             [ircMsg.nick]: { jumps: parseInt(jumpMatch[1] ?? jumpMatch[2], 10), text: displayText, timestamp: ircMsg.timestamp },
           };
+        } else if (ircMsg.nick && /\b(?:stdn|stand\s*down)\b/i.test(displayText)) {
+          // Standing down retracts the call: they are not on their way any more,
+          // so a countdown still ticking towards their arrival is worse than
+          // showing nothing. Checked as an else so a message that somehow carries
+          // both still registers the newer jump count.
+          //
+          // Only for someone never assigned, though. An assigned rat's count is
+          // part of the case record and standing down does not unmake the trip;
+          // an unassigned caller was only offering, so it is noise once they
+          // withdraw. The nick is checked against the learned map as well, since
+          // name matching can miss.
+          const nickIsAssigned = isAssignedRat
+            || Object.values(updatedRatIrcNicks).some(n => n?.toLowerCase() === ircMsg.nick!.toLowerCase());
+          if (!nickIsAssigned && updatedJumpCalls[ircMsg.nick]) {
+            const rest = { ...updatedJumpCalls };
+            delete rest[ircMsg.nick];
+            updatedJumpCalls = rest;
+          }
         }
 
         // Detect rat status reports: fr±, wr±, sys+, inst±, bc±, fuel+
@@ -855,7 +1039,40 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
     return exp ? `${short}-${expansionMap[exp] ?? exp}` : short;
   };
 
-  const sortedCases = [...cases].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+  // New-case alerts.
+  //
+  // Driven off the case list rather than from inside the merge, so it stays
+  // idempotent: the merge's updater can run more than once for a single refetch,
+  // and a notification that fires twice is very obvious.
+  useEffect(() => {
+    if (isLoadingApi) return;
+
+    if (!alertsPrimedRef.current) {
+      cases.forEach(c => alertedRef.current.add(c.id));
+      alertsPrimedRef.current = true;
+      return;
+    }
+
+    // Forget cases that have gone, so a reused case number alerts again rather
+    // than being mistaken for one already seen.
+    const present = new Set(cases.map(c => c.id));
+    alertedRef.current.forEach(id => {
+      if (!present.has(id)) alertedRef.current.delete(id);
+    });
+
+    for (const c of cases) {
+      if (alertedRef.current.has(c.id)) continue;
+      alertedRef.current.add(c.id);
+      alertNewCase(c, alertSettings);
+    }
+  }, [cases, isLoadingApi, alertSettings]);
+
+  const updateAlertSettings = (next: AlertSettings) => {
+    setAlertSettings(next);
+    saveAlertSettings(next);
+  };
+
+  const sortedCases = [...cases].sort(compareCases);
   const visibleCases = sortedCases.filter((c) => toggledCaseIds.has(c.id));
 
   const addMessage = (caseId: string, text: string, channel?: string, original?: string) => {
@@ -1008,7 +1225,9 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
               <h1 className="text-2xl font-bold text-orange-500">FuelRats Dispatch Board</h1>
               <p className="text-sm text-slate-400 mt-1">
                 Active Cases: {cases.length} | Viewing: {visibleCases.length} | Code Red:{' '}
-                {cases.filter((c) => c.status === 'code-red').length}
+                {/* oxygenStatus, not status: an inactive case can also be a code
+                    red, and status only carries one of the two. */}
+                {cases.filter((c) => c.oxygenStatus).length}
               </p>
             </div>
             <HeaderMenu
@@ -1016,6 +1235,8 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
               onSetView={setView}
               onAddCase={() => setShowAddCase(true)}
               onLogout={onLogout}
+              alertSettings={alertSettings}
+              onAlertSettingsChange={updateAlertSettings}
             />
           </div>
 
@@ -1062,6 +1283,23 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
               {sortedCases.map((caseData) => {
                 const isVisible = toggledCaseIds.has(caseData.id);
                 const hasUnread = unreadCases.has(caseData.id);
+                // A parked case always reads as parked. Earlier attempts made the
+                // greying conditional on there being nothing unread, which meant a
+                // case could be labelled INACTIVE and still look exactly like an
+                // active one -- unread is only cleared when the case window reports
+                // a click, so the flag sticks around long after it stops meaning
+                // anything.
+                //
+                // One appearance for every parked case, no exceptions. Varying it
+                // by unread or visibility was tried twice and both times produced a
+                // case that said INACTIVE while looking active.
+                //
+                // Applied to the row's contents rather than the row itself so the
+                // coloured left border and the pulsing background survive at full
+                // strength -- opacity on the button would take its own border with
+                // it, which is what made the earlier attempts trade one signal off
+                // against the other.
+                const dimmed = caseData.status === 'inactive';
                 return (
                   <button
                     key={caseData.id}
@@ -1078,6 +1316,10 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
                         style={{ opacity: 0.4 }}
                       />
                     )}
+                    <div
+                      style={dimmed ? { opacity: 0.45 } : undefined}
+                      className={dimmed ? 'grayscale' : undefined}
+                    >
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-1">
@@ -1090,7 +1332,17 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
                           <span className={`text-sm font-semibold truncate ${hasUnread && !isVisible ? 'text-white' : isVisible ? 'text-white' : 'text-slate-500'}`}>
                             CMDR {caseData.clientName}
                           </span>
-                          {caseData.status === 'code-red' && isVisible && (
+                          {caseData.status === 'inactive' && (
+                            <span className="text-[10px] font-semibold tracking-wider text-slate-400 border border-slate-600 rounded px-1 flex-shrink-0">
+                              INACTIVE
+                            </span>
+                          )}
+                          {/* oxygenStatus, not status: inactive outranks code-red
+                              in status, but the client is still on fumes.
+                              Shown regardless of visibility -- a hidden case has
+                              no window on screen, so this strip is the only place
+                              the code red can be seen at all. */}
+                          {caseData.oxygenStatus && (
                             <AlertTriangle className="w-3 h-3 text-red-500 animate-pulse flex-shrink-0" />
                           )}
                         </div>
@@ -1135,6 +1387,7 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
                           {shortPlatform(caseData.platform)}
                         </span>
                       </div>
+                    </div>
                     </div>
                   </button>
                 );

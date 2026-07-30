@@ -9,6 +9,19 @@ A browser-based dispatch tool for Fuel Rats dispatchers, connecting to the FuelR
 - Python 3 (for the local web server)
 - `bridge.exe` (pre-built, included in the release)
 
+### Building from source
+
+Create a `.env` in the project root before `npm run build`:
+
+```
+VITE_CLIENT_ID=<FuelRats OAuth client id>
+```
+
+`.env` is gitignored, and a build made without it compiles `client_id` to
+`undefined` — the app loads and an existing session keeps working, so the only
+symptom is that signing in dead-ends at the FuelRats authorize page. Worth
+checking on any build you intend to hand to someone else.
+
 ---
 
 ## Setup
