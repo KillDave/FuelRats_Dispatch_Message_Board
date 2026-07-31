@@ -45,6 +45,12 @@ Run `bridge.exe`. A console window will open and stay running in the background 
 
 To confirm the version: `bridge.exe --version`
 
+The bridge also reads your Elite journals, which is how Rat Mode knows your
+commanders, ships, and current system. It finds them via the registry, since the
+Saved Games folder can be relocated — set `JOURNAL_DIR` to override. Keep the
+bridge up to date alongside the board: position tracking lives here, so an older
+`bridge.exe` leaves it silently doing nothing.
+
 Optionally, you can register the `fr-dispatch://` protocol handler so the dispatch board can launch the bridge automatically on page load. This adds an entry to the Windows registry. If you'd rather just run the exe yourself each time, skip this step.
 
 ```
@@ -82,6 +88,15 @@ Click **Login** and you'll be redirected to [fuelrats.com](https://fuelrats.com)
 - Nearest station badge per case
 - Pinned jump calls panel in each case window
 
+**Your Accounts (Rat Mode)**
+- Commanders are picked up from the game journal on first open, with their last system and current ship
+- Position follows the journal while you play — no EDSM account, API key, or public profile needed
+- Jump estimates per case via Spansh, using short and long range EDSY builds per account
+
+**Alerts**
+- Windows notification and/or sound when a case comes in, both off until switched on
+- Selectable per platform, with PC split into Odyssey / Horizons / Legacy
+
 **Quick Messages**
 - Fully customizable button groups — add, remove, and reorder top-level groups
 - Platform variants, weighted random variants, and keepOpen popovers
@@ -100,6 +115,17 @@ Click **Login** and you'll be redirected to [fuelrats.com](https://fuelrats.com)
 ---
 
 ## Changelog
+
+### v1.1.5
+- Rat Mode reads the game journal: your commanders are added automatically with their last system and current ship, taken from the game's own `Loadout` event
+- Positions keep themselves current from the journal every 5 seconds, per-account, updating only the commander you are actually playing
+- New-case alerts — Windows notification and/or sound, off until enabled, selectable per platform with PC split into Odyssey / Horizons / Legacy
+- App version shown at the foot of the header menu
+- `bridge.exe` down from 14.5 MB to 10.4 MB — PyInstaller was embedding a cryptography library the bridge never uses, picked up from the build machine
+- Fixed an unnamed ship importing with a blank name: the game writes the ship name as a single space, so the fallback to the ship type was never reached. Affected pasted EDSY builds too
+- Fixed a rescue with no platform or expansion throwing while being parsed, which would have taken the whole poll with it
+- Fixed the rat status bar pushing its FR/WR/BC badges off the edge in a narrow column
+- API requests no longer served from the browser cache, which could hand a poll a stale case list
 
 ### v1.1.4
 - Case quotes (`!inject`/`!grab`) now shown raw alongside chat instead of flattened into the log, in both modes
