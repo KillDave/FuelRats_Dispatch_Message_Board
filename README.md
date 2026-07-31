@@ -101,6 +101,23 @@ Click **Login** and you'll be redirected to [fuelrats.com](https://fuelrats.com)
 
 ## Changelog
 
+### v1.1.4
+- Case quotes (`!inject`/`!grab`) now shown raw alongside chat instead of flattened into the log, in both modes
+- Rat mode brought to parity with dispatch: rats on case with FR/WR/BC/FUEL state, jump calls, supercruise ETA, client nick/language, and disconnected badge
+- Fixed nearest scoopable star never appearing in rat mode
+- Inactive cases now sorted below active ones and shown with an INACTIVE badge, instead of miscategorized as code-red
+- Code red warning now shows on hidden cases in the case selector
+- Rescues reconcile periodically while the WebSocket is connected, catching dropped events without a page reload
+- Fixed cases flashing when nothing had actually arrived
+- Jump count now clears when an unassigned caller stands down
+
+### v1.1.3
+- Spansh jump estimates in Rat Mode, with per-account short/long-range EDSY builds
+- Click-to-copy system names in both modes
+- Rat mode auto-translates incoming debrief messages
+- Rat mode now shows translations on case messages
+- `bridge:build` now uses whatever Python is on PATH instead of a hardcoded interpreter path
+
 ### v1.1.2
 - Langbly translation settings page and service, alongside DeepL
 - `#debrief` IRC channel messages now surface in Rat Mode
