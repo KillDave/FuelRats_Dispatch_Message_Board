@@ -166,6 +166,180 @@ def _spansh_forward(path, headers, body, method='POST'):
         return 502, 'text/plain', str(e).encode()
 
 
+def _journal_dir():
+    """Where Elite writes its journals.
+
+    The default lives under Saved Games, which is not %USERPROFILE%\\Documents and
+    can be relocated, so the registry is asked first and the usual path is only a
+    fallback. JOURNAL_DIR overrides both, for a non-standard install or a copy
+    synced from another machine.
+    """
+    override = os.environ.get('JOURNAL_DIR')
+    if override and os.path.isdir(override):
+        return override
+
+    saved_games = None
+    try:
+        import winreg
+        key = winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r'Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders',
+        )
+        # {4C5C32FF-BB9D-43b0-B5B4-2D72E54EAAA4} is Saved Games.
+        saved_games, _ = winreg.QueryValueEx(key, '{4C5C32FF-BB9D-43b0-B5B4-2D72E54EAAA4}')
+    except Exception:
+        pass
+
+    candidates = []
+    if saved_games:
+        candidates.append(os.path.join(saved_games, 'Frontier Developments', 'Elite Dangerous'))
+    candidates.append(os.path.join(
+        os.path.expanduser('~'), 'Saved Games', 'Frontier Developments', 'Elite Dangerous'))
+
+    for c in candidates:
+        if os.path.isdir(c):
+            return c
+    return None
+
+
+def _journal_position():
+    """Current commander and system, read from the newest journal.
+
+    Read backwards from the end: the events that carry a system are written as
+    they happen, so the last one wins, and a long session's journal is not worth
+    parsing in full to answer this. Only the newest file is consulted -- Elite
+    starts a fresh one per session, so an older file cannot hold a newer position.
+    """
+    d = _journal_dir()
+    if not d:
+        return {'error': 'journal directory not found'}
+
+    try:
+        logs = [f for f in os.listdir(d) if f.startswith('Journal.') and f.endswith('.log')]
+        if not logs:
+            return {'error': 'no journal files'}
+        newest = max(logs, key=lambda f: os.path.getmtime(os.path.join(d, f)))
+        path = os.path.join(d, newest)
+
+        system = timestamp = cmdr = None
+        docked = None
+        with open(path, 'r', encoding='utf-8', errors='replace') as fh:
+            lines = fh.readlines()
+
+        for line in reversed(lines):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                ev = json.loads(line)
+            except ValueError:
+                continue
+            kind = ev.get('event')
+            # Location is emitted on load and on relog; FSDJump and CarrierJump on
+            # arrival. Any of them is authoritative for where the ship now is.
+            if system is None and kind in ('FSDJump', 'CarrierJump', 'Location'):
+                system = ev.get('StarSystem')
+                timestamp = ev.get('timestamp')
+                docked = ev.get('Docked')
+            if cmdr is None and kind in ('Commander', 'LoadGame'):
+                cmdr = ev.get('Name')
+            if system and cmdr:
+                break
+
+        if not system:
+            return {'error': 'no position in the current journal'}
+        return {
+            'system': system,
+            'cmdr': cmdr,
+            'timestamp': timestamp,
+            'docked': docked,
+            'journal': newest,
+        }
+    except Exception as e:
+        return {'error': str(e)}
+
+
+def _journal_commanders(max_files=60):
+    """Every commander the journals know about, with their last system and ship.
+
+    Files are walked newest first and the first answer for a commander wins, so
+    an old session cannot overwrite a newer one. The scan is capped because a
+    long-running install accumulates hundreds of journals and the older ones can
+    only repeat what has already been found.
+
+    The Loadout event is returned verbatim: it is the same shape EDSY's "Journal"
+    export produces, so the board can feed it to the existing build parser rather
+    than having a second one here.
+    """
+    d = _journal_dir()
+    if not d:
+        return {'error': 'journal directory not found'}
+
+    try:
+        logs = [f for f in os.listdir(d) if f.startswith('Journal.') and f.endswith('.log')]
+        if not logs:
+            return {'error': 'no journal files'}
+        logs.sort(key=lambda f: os.path.getmtime(os.path.join(d, f)), reverse=True)
+
+        found = {}
+        newest_cmdr = None
+
+        for name in logs[:max_files]:
+            cmdr = None
+            system = timestamp = docked = None
+            loadout = None
+
+            try:
+                with open(os.path.join(d, name), 'r', encoding='utf-8', errors='replace') as fh:
+                    for line in fh:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            ev = json.loads(line)
+                        except ValueError:
+                            continue
+                        kind = ev.get('event')
+                        if kind in ('Commander', 'LoadGame'):
+                            cmdr = ev.get('Name') or cmdr
+                        elif kind in ('FSDJump', 'CarrierJump', 'Location'):
+                            system = ev.get('StarSystem')
+                            timestamp = ev.get('timestamp')
+                            docked = ev.get('Docked')
+                        elif kind == 'Loadout':
+                            # Later Loadouts supersede earlier ones in the same
+                            # session -- refits, module swaps, a different ship.
+                            loadout = ev
+            except OSError:
+                continue
+
+            if not cmdr:
+                continue
+            if newest_cmdr is None:
+                newest_cmdr = cmdr
+
+            entry = found.setdefault(cmdr, {'cmdr': cmdr})
+            if system and 'system' not in entry:
+                entry['system'] = system
+                entry['timestamp'] = timestamp
+                entry['docked'] = docked
+            if loadout and 'loadout' not in entry:
+                entry['loadout'] = loadout
+                entry['ship'] = loadout.get('Ship')
+                entry['shipName'] = loadout.get('ShipName')
+
+        return {
+            'commanders': list(found.values()),
+            # Whoever the most recently written journal belongs to. Not necessarily
+            # in game right now, but the best available answer for "who is active".
+            'active': newest_cmdr,
+            'scanned': min(len(logs), max_files),
+            'total': len(logs),
+        }
+    except Exception as e:
+        return {'error': str(e)}
+
+
 PROXY_PORT = 8081
 CORS = (
     'Access-Control-Allow-Origin: *\r\n'
@@ -207,7 +381,14 @@ async def handle_deepl_http(reader, writer):
                 break
             body += chunk
 
-        if path.startswith('/spansh-proxy/'):
+        if path.startswith('/journal/commanders'):
+            payload = json.dumps(_journal_commanders()).encode()
+            status, content_type, resp_body = 200, 'application/json', payload
+        elif path.startswith('/journal/position'):
+            # Local file read, so no executor round trip and no upstream call.
+            payload = json.dumps(_journal_position()).encode()
+            status, content_type, resp_body = 200, 'application/json', payload
+        elif path.startswith('/spansh-proxy/'):
             status, content_type, resp_body = await asyncio.get_event_loop().run_in_executor(
                 None, _spansh_forward, path, headers, body if body else None, method
             )

@@ -24,6 +24,14 @@ export interface RatAccount {
    * because it describes where the rat is sitting, not what they fly.
    */
   startSupercharged?: boolean;
+  /**
+   * Keep `system` in step with where EDSM says this commander is. Opt-in per
+   * account: it overwrites whatever was typed, which is only wanted for an
+   * account whose EDMC is actually running.
+   */
+  autoLocate?: boolean;
+  /** EDSM's timestamp for the last position applied, for showing staleness. */
+  positionAt?: string;
 }
 
 export interface AccountCardDist {
@@ -73,6 +81,45 @@ export function useRatAccounts() {
       })),
     setSupercharged: (id: string, on: boolean) =>
       save(accounts.map(a => (a.id === id ? { ...a, startSupercharged: on } : a))),
+    /**
+     * Add commanders found in the game journals.
+     *
+     * Only ever adds. An account already on the list is left completely alone --
+     * its system may have been typed deliberately, and its ship will usually have
+     * been tuned (cargo especially) in a way the raw Loadout does not capture.
+     */
+    importDetected: (found: {
+      cmdr: string;
+      system?: string;
+      positionAt?: string;
+      ship?: ShipParams;
+    }[]) => {
+      const have = new Set(accounts.map(a => a.cmdr.trim().toLowerCase()));
+      const additions = found
+        .filter(f => f.cmdr.trim() && !have.has(f.cmdr.trim().toLowerCase()))
+        .map(f => ({
+          id: crypto.randomUUID(),
+          cmdr: f.cmdr.trim(),
+          system: f.system ?? '',
+          positionAt: f.positionAt,
+          autoLocate: true,
+          ships: f.ship ? { short: f.ship } : undefined,
+        }));
+      if (additions.length) save([...accounts, ...additions]);
+      return additions.length;
+    },
+    setAutoLocate: (id: string, on: boolean) =>
+      save(accounts.map(a => (a.id === id ? { ...a, autoLocate: on } : a))),
+    /**
+     * Applied from EDSM. A no-op when the system is unchanged so a poll that
+     * finds the rat where it left them does not churn state every minute.
+     */
+    setLocation: (id: string, system: string, positionAt?: string) =>
+      save(accounts.map(a =>
+        a.id === id && (a.system !== system || a.positionAt !== positionAt)
+          ? { ...a, system, positionAt }
+          : a,
+      )),
     remove: (id: string) =>
       save(accounts.filter(a => a.id !== id)),
   };

@@ -1,11 +1,14 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { Zap } from 'lucide-react';
+import { Zap, MapPin } from 'lucide-react';
 import type { Case, Message } from './DispatchBoard';
 import { compareCases } from './DispatchBoard';
 import { RatCaseCard } from './RatCaseCard';
 import { RatCaseDetail } from './RatCaseDetail';
 import { useRatAccounts, type RatAccount, type AccountCardDist, type ShipSlot } from '../hooks/useRatAccounts';
 import { ircWebSocket } from '../services/ircWebSocket';
+import {
+  fetchJournalPosition, fetchDetectedCommanders, positionAge, POSITION_POLL_MS,
+} from '../services/journalPosition';
 import { translateText, toDeepLTargetLang } from '../services/translationService';
 import { langblyTranslate, toLangblyTargetLang } from '../services/langblyService';
 import {
@@ -55,6 +58,7 @@ interface AccountRowProps {
   onUpdate: (id: string, cmdr: string, system: string) => void;
   onSetShip: (id: string, slot: ShipSlot, ship: ShipParams | undefined) => void;
   onSetSupercharged: (id: string, on: boolean) => void;
+  onSetAutoLocate: (id: string, on: boolean) => void;
   onRemove: (id: string) => void;
 }
 
@@ -181,7 +185,7 @@ function ShipEditor({ account, slot, onSetShip, onClose }: {
   );
 }
 
-function AccountRow({ account, onUpdate, onSetShip, onSetSupercharged, onRemove }: AccountRowProps) {
+function AccountRow({ account, onUpdate, onSetShip, onSetSupercharged, onSetAutoLocate, onRemove }: AccountRowProps) {
   const [editing, setEditing] = useState(false);
   const [shipSlot, setShipSlot] = useState<ShipSlot | null>(null);
   const [cmdr, setCmdr]     = useState(account.cmdr);
@@ -247,6 +251,26 @@ function AccountRow({ account, onUpdate, onSetShip, onSetSupercharged, onRemove 
         }`}
       >
         <Zap className="w-3.5 h-3.5" fill={account.startSupercharged ? 'currentColor' : 'none'} />
+      </button>
+      {/* Live position from EDSM. Off by default because turning it on
+          overwrites whatever was typed, which is only wanted for an account
+          whose EDMC is actually uploading. */}
+      <button
+        type="button"
+        onClick={() => onSetAutoLocate(account.id, !account.autoLocate)}
+        aria-pressed={!!account.autoLocate}
+        title={
+          account.autoLocate
+            ? `Tracking this CMDR from the game journal (${positionAge(account.positionAt)}). Click to stop and set the system by hand.`
+            : 'Set the system by hand. Click to follow the game journal instead — needs the bridge running, and updates only while you are the CMDR playing.'
+        }
+        className={`flex-shrink-0 rounded px-1 py-0.5 transition-colors ${
+          account.autoLocate
+            ? 'text-emerald-300 bg-emerald-500/15 hover:bg-emerald-500/25'
+            : 'text-slate-600 hover:text-emerald-300 hover:bg-slate-700/50'
+        }`}
+      >
+        <MapPin className="w-3.5 h-3.5" fill={account.autoLocate ? 'currentColor' : 'none'} />
       </button>
       {(['short', 'long'] as ShipSlot[]).map(slot => {
         const ship = account.ships?.[slot];
@@ -332,10 +356,11 @@ interface AccountsPanelProps {
   onUpdate: (id: string, cmdr: string, system: string) => void;
   onSetShip: (id: string, slot: ShipSlot, ship: ShipParams | undefined) => void;
   onSetSupercharged: (id: string, on: boolean) => void;
+  onSetAutoLocate: (id: string, on: boolean) => void;
   onRemove: (id: string) => void;
 }
 
-function AccountsPanel({ accounts, onAdd, onUpdate, onSetShip, onSetSupercharged, onRemove }: AccountsPanelProps) {
+function AccountsPanel({ accounts, onAdd, onUpdate, onSetShip, onSetSupercharged, onSetAutoLocate, onRemove }: AccountsPanelProps) {
   const [adding, setAdding] = useState(false);
 
   const handleAdd = (cmdr: string, system: string) => {
@@ -355,7 +380,7 @@ function AccountsPanel({ accounts, onAdd, onUpdate, onSetShip, onSetSupercharged
       </div>
       <div className="px-4 pb-3 space-y-0.5">
         {accounts.map(a => (
-          <AccountRow key={a.id} account={a} onUpdate={onUpdate} onSetShip={onSetShip} onSetSupercharged={onSetSupercharged} onRemove={onRemove} />
+          <AccountRow key={a.id} account={a} onUpdate={onUpdate} onSetShip={onSetShip} onSetSupercharged={onSetSupercharged} onSetAutoLocate={onSetAutoLocate} onRemove={onRemove} />
         ))}
         {adding && <AddAccountRow onAdd={handleAdd} onCancel={() => setAdding(false)} />}
         {accounts.length === 0 && !adding && (
@@ -381,7 +406,7 @@ export function RatBoard({ cases, debriefMessages }: RatBoardProps) {
   const [selectedCaseId, setSelectedCaseId]     = useState<string | null>(null);
   const [isClosed, setIsClosed]                 = useState(false);
   const frozenCaseRef                           = useRef<Case | null>(null);
-  const { accounts, add, update, setShip, setSupercharged, remove } = useRatAccounts();
+  const { accounts, add, update, setShip, setSupercharged, setAutoLocate, setLocation, importDetected, remove } = useRatAccounts();
   const [id64Map, setId64Map] = useState<Map<string, number>>(new Map());
   const [jumpMap, setJumpMap] = useState<Record<string, {
     jumps: number | null;
@@ -499,6 +524,87 @@ export function RatBoard({ cases, debriefMessages }: RatBoardProps) {
       return next;
     });
   };
+
+  // Adopt the commanders the journals know about, once per session.
+  //
+  // Only fills gaps: importDetected skips any CMDR already on the list, so a
+  // system typed by hand or a ship whose cargo was tuned is never overwritten.
+  // A refit after this runs will not be picked up either -- re-paste the build,
+  // which is also the point at which the cargo figure gets confirmed.
+  const importedRef = useRef(false);
+  useEffect(() => {
+    if (importedRef.current) return;
+    importedRef.current = true;
+    const controller = new AbortController();
+
+    void (async () => {
+      const scan = await fetchDetectedCommanders(controller.signal);
+      if (!scan) return;
+
+      const found = scan.commanders.map(c => {
+        let ship: ShipParams | undefined;
+        if (c.loadout) {
+          try {
+            const parsed = parseEdsyBuild(JSON.stringify(c.loadout));
+            // Same bar as a pasted build: if our range disagrees with the one the
+            // game reported, the parse is wrong and a silent bad estimate is
+            // worse than no ship at all.
+            if (verifyBuild(parsed).ok) ship = parsed;
+          } catch {
+            /* unreadable loadout -- add the account without a ship */
+          }
+        }
+        return { cmdr: c.cmdr, system: c.system, positionAt: c.timestamp, ship };
+      });
+
+      importDetected(found);
+    })();
+
+    return () => controller.abort();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Live position from the local journal, for accounts that opted in.
+  //
+  // The journal describes whoever is playing on this machine, so the commander
+  // it reports decides which account is updated -- an account for a different
+  // CMDR is left alone even with the toggle on, rather than being given someone
+  // else's position.
+  const trackedCmdrs = accounts
+    .filter(a => a.autoLocate && a.cmdr.trim())
+    .map(a => `${a.id}:${a.cmdr}`)
+    .join('|');
+
+  useEffect(() => {
+    if (!trackedCmdrs) return;
+    const controller = new AbortController();
+
+    const tick = async () => {
+      const res = await fetchJournalPosition(controller.signal);
+      if (!res.ok) return; // bridge down, or the game has not written one yet
+      const { system, cmdr, timestamp } = res.position;
+
+      const targets = trackedCmdrs.split('|').map(entry => {
+        const i = entry.indexOf(':');
+        return { id: entry.slice(0, i), cmdr: entry.slice(i + 1) };
+      });
+
+      // With no commander in the journal there is nothing to match on, so a
+      // single tracked account is assumed to be the one being played. More than
+      // one and it is left alone rather than guessed at.
+      const matches = cmdr
+        ? targets.filter(t => t.cmdr.trim().toLowerCase() === cmdr.trim().toLowerCase())
+        : (targets.length === 1 ? targets : []);
+
+      for (const t of matches) setLocation(t.id, system, timestamp);
+    };
+
+    void tick();
+    const timer = window.setInterval(() => void tick(), POSITION_POLL_MS);
+    return () => {
+      controller.abort();
+      clearInterval(timer);
+    };
+  }, [trackedCmdrs]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const visibleCases = cases
     .filter(c => c.status !== 'closed')
@@ -823,7 +929,7 @@ export function RatBoard({ cases, debriefMessages }: RatBoardProps) {
             onAdd={add}
             onUpdate={update}
             onSetShip={setShip}
-            onSetSupercharged={setSupercharged}
+            onSetSupercharged={setSupercharged} onSetAutoLocate={setAutoLocate}
             onRemove={remove}
           />
         </>

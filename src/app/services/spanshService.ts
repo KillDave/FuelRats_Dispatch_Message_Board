@@ -141,7 +141,10 @@ export function parseEdsyBuild(raw: string): ShipParams {
   const rangeBoost = booster && booster.On !== false ? GUARDIAN_BOOSTER_LY[boosterSize] ?? 0 : 0;
 
   return {
-    shipName: loadout.ShipName || loadout.Ship || 'ship',
+    // Trimmed before falling back: an unnamed ship comes through as a single
+    // space rather than an empty string, which is truthy, so the ship type was
+    // never reached and the build showed up nameless.
+    shipName: loadout.ShipName?.trim() || loadout.Ship || 'ship',
     sourceJson: raw,
     superchargeMultiplier: SUPERCHARGE_MULTIPLIERS[fsd.Item?.toLowerCase()],
     optimalMass,
