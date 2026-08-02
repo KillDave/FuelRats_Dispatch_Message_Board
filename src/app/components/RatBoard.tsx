@@ -8,6 +8,7 @@ import { useRatAccounts, type RatAccount, type AccountCardDist, type ShipSlot } 
 import { ircWebSocket } from '../services/ircWebSocket';
 import {
   fetchJournalPosition, fetchDetectedCommanders, positionAge, POSITION_POLL_MS,
+  isJournalEnabled, setJournalEnabled,
 } from '../services/journalPosition';
 import { translateText, toDeepLTargetLang } from '../services/translationService';
 import { langblyTranslate, toLangblyTargetLang } from '../services/langblyService';
@@ -59,6 +60,7 @@ interface AccountRowProps {
   onSetShip: (id: string, slot: ShipSlot, ship: ShipParams | undefined) => void;
   onSetSupercharged: (id: string, on: boolean) => void;
   onSetAutoLocate: (id: string, on: boolean) => void;
+  journalEnabled: boolean;
   onRemove: (id: string) => void;
 }
 
@@ -185,7 +187,7 @@ function ShipEditor({ account, slot, onSetShip, onClose }: {
   );
 }
 
-function AccountRow({ account, onUpdate, onSetShip, onSetSupercharged, onSetAutoLocate, onRemove }: AccountRowProps) {
+function AccountRow({ account, onUpdate, onSetShip, onSetSupercharged, onSetAutoLocate, journalEnabled, onRemove }: AccountRowProps) {
   const [editing, setEditing] = useState(false);
   const [shipSlot, setShipSlot] = useState<ShipSlot | null>(null);
   const [cmdr, setCmdr]     = useState(account.cmdr);
@@ -252,9 +254,9 @@ function AccountRow({ account, onUpdate, onSetShip, onSetSupercharged, onSetAuto
       >
         <Zap className="w-3.5 h-3.5" fill={account.startSupercharged ? 'currentColor' : 'none'} />
       </button>
-      {/* Live position from EDSM. Off by default because turning it on
-          overwrites whatever was typed, which is only wanted for an account
-          whose EDMC is actually uploading. */}
+      {/* Hidden entirely when the journal feature is off: with nothing polling,
+          the toggle would remember a preference that does nothing. */}
+      {journalEnabled && (
       <button
         type="button"
         onClick={() => onSetAutoLocate(account.id, !account.autoLocate)}
@@ -272,6 +274,7 @@ function AccountRow({ account, onUpdate, onSetShip, onSetSupercharged, onSetAuto
       >
         <MapPin className="w-3.5 h-3.5" fill={account.autoLocate ? 'currentColor' : 'none'} />
       </button>
+      )}
       {(['short', 'long'] as ShipSlot[]).map(slot => {
         const ship = account.ships?.[slot];
         return (
@@ -357,10 +360,12 @@ interface AccountsPanelProps {
   onSetShip: (id: string, slot: ShipSlot, ship: ShipParams | undefined) => void;
   onSetSupercharged: (id: string, on: boolean) => void;
   onSetAutoLocate: (id: string, on: boolean) => void;
+  journalEnabled: boolean;
+  onToggleJournal: (on: boolean) => void;
   onRemove: (id: string) => void;
 }
 
-function AccountsPanel({ accounts, onAdd, onUpdate, onSetShip, onSetSupercharged, onSetAutoLocate, onRemove }: AccountsPanelProps) {
+function AccountsPanel({ accounts, onAdd, onUpdate, onSetShip, onSetSupercharged, onSetAutoLocate, journalEnabled, onToggleJournal, onRemove }: AccountsPanelProps) {
   const [adding, setAdding] = useState(false);
 
   const handleAdd = (cmdr: string, system: string) => {
@@ -372,6 +377,22 @@ function AccountsPanel({ accounts, onAdd, onUpdate, onSetShip, onSetSupercharged
     <div className="flex-shrink-0 border-t border-slate-700/60 bg-slate-900/70 max-h-52 overflow-y-auto">
       <div className="flex items-center justify-between px-4 py-2 sticky top-0 bg-slate-900/90 backdrop-blur-sm z-10">
         <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">My Accounts</span>
+        <label
+          className="flex items-center gap-1.5 text-[11px] text-slate-500 cursor-pointer ml-auto mr-3"
+          title={
+            journalEnabled
+              ? 'Reading the game journal: commanders are added automatically and their system follows where you fly. Uncheck to manage accounts by hand.'
+              : 'Off. Turn on to add the commanders on this machine automatically and keep their system current from the game journal. Needs the bridge running.'
+          }
+        >
+          <input
+            type="checkbox"
+            checked={journalEnabled}
+            onChange={e => onToggleJournal(e.target.checked)}
+            className="accent-emerald-500"
+          />
+          Use game journal
+        </label>
         {!adding && (
           <button onClick={() => setAdding(true)} className="text-xs text-orange-400 hover:text-orange-300 transition-colors">
             + Add
@@ -380,7 +401,7 @@ function AccountsPanel({ accounts, onAdd, onUpdate, onSetShip, onSetSupercharged
       </div>
       <div className="px-4 pb-3 space-y-0.5">
         {accounts.map(a => (
-          <AccountRow key={a.id} account={a} onUpdate={onUpdate} onSetShip={onSetShip} onSetSupercharged={onSetSupercharged} onSetAutoLocate={onSetAutoLocate} onRemove={onRemove} />
+          <AccountRow key={a.id} account={a} onUpdate={onUpdate} onSetShip={onSetShip} onSetSupercharged={onSetSupercharged} onSetAutoLocate={onSetAutoLocate} journalEnabled={journalEnabled} onRemove={onRemove} />
         ))}
         {adding && <AddAccountRow onAdd={handleAdd} onCancel={() => setAdding(false)} />}
         {accounts.length === 0 && !adding && (
@@ -525,6 +546,15 @@ export function RatBoard({ cases, debriefMessages }: RatBoardProps) {
     });
   };
 
+  const [journalEnabled, setJournalEnabledState] = useState(isJournalEnabled);
+  const toggleJournal = (on: boolean) => {
+    setJournalEnabled(on);
+    setJournalEnabledState(on);
+    // Let a re-enable re-scan: commanders may have been added since, and the
+    // import only ever fills gaps so running it again is harmless.
+    if (!on) importedRef.current = false;
+  };
+
   // Adopt the commanders the journals know about, once per session.
   //
   // Only fills gaps: importDetected skips any CMDR already on the list, so a
@@ -533,7 +563,7 @@ export function RatBoard({ cases, debriefMessages }: RatBoardProps) {
   // which is also the point at which the cargo figure gets confirmed.
   const importedRef = useRef(false);
   useEffect(() => {
-    if (importedRef.current) return;
+    if (!journalEnabled || importedRef.current) return;
     importedRef.current = true;
     const controller = new AbortController();
 
@@ -561,7 +591,7 @@ export function RatBoard({ cases, debriefMessages }: RatBoardProps) {
     })();
 
     return () => controller.abort();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [journalEnabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Live position from the local journal, for accounts that opted in.
   //
@@ -575,7 +605,7 @@ export function RatBoard({ cases, debriefMessages }: RatBoardProps) {
     .join('|');
 
   useEffect(() => {
-    if (!trackedCmdrs) return;
+    if (!journalEnabled || !trackedCmdrs) return;
     const controller = new AbortController();
 
     const tick = async () => {
@@ -604,7 +634,7 @@ export function RatBoard({ cases, debriefMessages }: RatBoardProps) {
       controller.abort();
       clearInterval(timer);
     };
-  }, [trackedCmdrs]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [trackedCmdrs, journalEnabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const visibleCases = cases
     .filter(c => c.status !== 'closed')
@@ -929,7 +959,7 @@ export function RatBoard({ cases, debriefMessages }: RatBoardProps) {
             onAdd={add}
             onUpdate={update}
             onSetShip={setShip}
-            onSetSupercharged={setSupercharged} onSetAutoLocate={setAutoLocate}
+            onSetSupercharged={setSupercharged} onSetAutoLocate={setAutoLocate} journalEnabled={journalEnabled} onToggleJournal={toggleJournal}
             onRemove={remove}
           />
         </>

@@ -14,6 +14,33 @@
 const PROXY = () =>
   localStorage.getItem('fr_deepl_proxy_url') || 'http://localhost:8081';
 
+const KEY_ENABLED = 'ratboard-journal-enabled';
+
+/**
+ * Off until asked for.
+ *
+ * Reading the journals means adding every commander that has ever played on this
+ * machine and then overwriting the system field on a timer. That is useful once
+ * you want it and presumptuous before, and it also only works with a bridge new
+ * enough to serve the endpoints -- so it stays quiet rather than looking broken.
+ */
+export function isJournalEnabled(): boolean {
+  try {
+    return localStorage.getItem(KEY_ENABLED) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export function setJournalEnabled(on: boolean): void {
+  try {
+    if (on) localStorage.setItem(KEY_ENABLED, '1');
+    else localStorage.removeItem(KEY_ENABLED);
+  } catch {
+    /* private mode — the choice just will not persist */
+  }
+}
+
 export interface JournalPosition {
   system: string;
   /** Commander currently loaded, so the right account gets updated. */
