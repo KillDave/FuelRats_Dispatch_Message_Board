@@ -120,6 +120,7 @@ Click **Login** and you'll be redirected to [fuelrats.com](https://fuelrats.com)
 
 ### v1.1.6
 - The board verifies your account before it loads, requiring `dispatch.read` and `dispatch.write` — the permissions the **Drilled Rat** group carries. Anyone without them gets a screen pointing at how to get drilled or trained
+- Fixed signing in with FuelRats never completing: `/authorize` redirects back with the token in the query string rather than the URL fragment, so the callback read an empty fragment and sent you back to the login screen after authorising successfully
 - Journal reading is opt-in per account instead of adding every commander it finds. The import only fills gaps, so enabling it cannot clobber an account set up by hand, and disabling it leaves that account in place and stops updating it
 - Case notes collapse runs of join/leave lines into one entry, so a client reconnecting repeatedly no longer buries the case
 - Click a quote in the case notes to send it back as `!sub`, line and index already filled in
