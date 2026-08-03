@@ -163,6 +163,22 @@ const canSeeColonization = (platform: string) =>
   platform.includes('Odyssey') || platform.includes('Horizons');
 
 const RESCUE_DEFAULT: QuickMessageGroup = { label: 'RESCUE', messages: rescueMessages };
+/**
+ * The FuelRats hourly request allowance.
+ *
+ * Only used to colour the counter. The live figures come from the API on
+ * every response -- `meta.rateLimitTotal` alongside `rateLimitRemaining` --
+ * so this is a fallback for the shading, not the number on screen.
+ */
+const RATE_LIMIT_TOTAL = 3600;
+
+/** "52m" or "8m 20s" once it is close, since the last minute is the tense one. */
+function formatResetIn(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return m >= 10 ? `${m}m` : m > 0 ? `${m}m ${s}s` : `${s}s`;
+}
+
 const DEFAULT_BUTTON_GROUPS: QuickMessageGroup[] = [RESCUE_DEFAULT, dispatchMessages];
 
 function loadButtonGroups(): QuickMessageGroup[] {
@@ -403,8 +419,8 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [unreadCases, setUnreadCases] = useState<Set<string>>(new Set());
   const [isLoadingApi, setIsLoadingApi] = useState(false);
-  const [, setRateLimitRemaining] = useState(0);
-  const [, setSecondsToReset] = useState(0);
+  const [rateLimitRemaining, setRateLimitRemaining] = useState(0);
+  const [secondsToReset, setSecondsToReset] = useState(0);
   const [alertSettings, setAlertSettings] = useState<AlertSettings>(loadAlertSettings);
   /** Cases already alerted for, so a re-render or refetch cannot ping twice. */
   const alertedRef = useRef<Set<string>>(new Set());
@@ -1467,6 +1483,36 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
                     <div className={`w-2 h-2 rounded-full ${ircStatus === 'connected' ? 'bg-green-400' : ircStatus === 'connecting' ? 'bg-yellow-400 animate-pulse' : ircStatus === 'error' ? 'bg-red-400' : 'bg-slate-500'}`} />
                     <span className={`text-xs ${ircStatus === 'connected' ? 'text-green-400' : ircStatus === 'connecting' ? 'text-yellow-400' : ircStatus === 'error' ? 'text-red-400' : 'text-slate-400'}`}>IRC</span>
                   </div>
+                  {/* Requests left this hour. The API reports it on every
+                      response and the board has tracked it all along; nothing
+                      rendered it, so the figure was being kept and thrown away
+                      once a second. Amber under a quarter left, red under a
+                      tenth -- the board's own polling is about 10% of the
+                      allowance, so anything near those is something else. */}
+                  {useApiData && rateLimitRemaining > 0 && (
+                    <div
+                      className="flex items-center gap-1.5"
+                      title={`${rateLimitRemaining} of ${RATE_LIMIT_TOTAL} API requests left this hour`}
+                    >
+                      <span
+                        className={`text-xs ${
+                          rateLimitRemaining < RATE_LIMIT_TOTAL * 0.1
+                            ? 'text-red-400'
+                            : rateLimitRemaining < RATE_LIMIT_TOTAL * 0.25
+                              ? 'text-yellow-400'
+                              : 'text-slate-400'
+                        }`}
+                      >
+                        {rateLimitRemaining.toLocaleString()}
+                        <span className="text-slate-600"> left</span>
+                      </span>
+                      {secondsToReset > 0 && (
+                        <span className="text-xs text-slate-600">
+                          · {formatResetIn(secondsToReset)}
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
                 <span className="text-slate-500 text-xs">{isConnectionPanelOpen ? '▼︎' : '▶︎'}</span>
               </div>
