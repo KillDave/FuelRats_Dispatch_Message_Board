@@ -4,11 +4,8 @@ A browser-based dispatch tool for Fuel Rats dispatchers, connecting to the FuelR
 
 ## Requirements
 
-- A FuelRats account in the **Drilled Rat** group — this is checked, not merely
-  expected: the board reads your group membership on load and will not open
-  without it
-- Some features are limited further to the **Drilled Dispatch** group, and are
-  hidden rather than disabled for anyone else — see [Case history](#case-history)
+- A FuelRats account in the **Drilled Rat** group.
+- Case history and search additionally require the **Drilled Dispatch** group.
 - [AdiIRC](https://www.adiirc.com/) (or HexChat — see [IRC client setup](#irc-client-setup))
 - Python 3 (for the local web server)
 - `bridge.exe` (pre-built, included in the release)
