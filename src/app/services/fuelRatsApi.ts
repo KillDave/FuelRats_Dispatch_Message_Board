@@ -1,7 +1,7 @@
 import { Case, CaseStatus, Injection, Message } from '../components/DispatchBoard';
 import { authService } from './authService';
 
-interface ApiQuote {
+export interface ApiQuote {
   author: string;
   message: string;
   createdAt: string;
@@ -9,7 +9,7 @@ interface ApiQuote {
   lastAuthor: string;
 }
 
-interface ApiRescueAttributes {
+export interface ApiRescueAttributes {
   client: string;
   clientNick: string;
   clientLanguage: string;
@@ -37,7 +37,7 @@ interface ApiRescueAttributes {
   quotes: ApiQuote[];
 }
 
-interface ApiRescue {
+export interface ApiRescue {
   type: string;
   id: string;
   attributes: ApiRescueAttributes;
@@ -997,6 +997,303 @@ export class FuelRatsApiService {
     };
   }
 
+  // ── Looking up past rescues ────────────────────────────────────────────
+
+  /**
+   * Previous rescues for a client.
+   *
+   * Matched on both `client` and `clientNick`, because they are separate
+   * fields and disagree on roughly a quarter of cases -- someone rescued
+   * under one IRC nick and a different CMDR name would otherwise show no
+   * history at all. `or` does it in one request rather than two.
+   *
+   * Only closed rescues are returned. An open one is not history, and the
+   * case on screen is the obvious example -- it matches its own client and
+   * would otherwise list itself.
+   *
+   * The match is still a guess. There is no account behind a client: both
+   * fields are free text typed when the case was opened, and nothing links
+   * a rescue to a verified identity. Callers should present the result as
+   * possible history rather than as fact.
+   */
+  async fetchClientHistory(
+    client: string,
+    clientNick?: string,
+    options: { limit?: number; excludeId?: string } = {},
+  ): Promise<RescueSearchResult> {
+    const names = [client, clientNick]
+      .map((n) => (n ?? '').trim())
+      .filter((n) => n.length > 0);
+
+    if (names.length === 0) {
+      return { total: 0, cases: [] };
+    }
+
+    // Deduplicated: the two fields are equal on most cases, and asking twice
+    // for the same string would only widen the OR for nothing.
+    const unique = Array.from(new Set(names.map((n) => n.toLowerCase())))
+      .map((lower) => names.find((n) => n.toLowerCase() === lower)!);
+
+    const clauses = unique.flatMap((name) => [
+      { client: { iLike: name } },
+      { clientNick: { iLike: name } },
+    ]);
+
+    const result = await this.queryRescues({ or: clauses }, {
+      limit: options.limit ?? 10,
+      sort: '-createdAt',
+    });
+
+    // Two ways of dropping the case being looked at, because one of them is
+    // not always available. `excludeId` is exact but depends on the caller
+    // knowing the rescue's UUID, which it does not while a case is still
+    // settling. A rescue that has not closed is not "previous" by any reading,
+    // so that catches the same case whether or not the id was passed.
+    const before = result.cases.length;
+    const kept = result.cases.filter(
+      (c) => c.id !== options.excludeId && c.status === 'closed',
+    );
+    const dropped = before - kept.length;
+
+    return {
+      ...result,
+      cases: kept,
+      // The total counted them too, so it has to come down as well or the
+      // list and the figure beside it tell different stories.
+      total: Math.max(0, result.total - dropped),
+    };
+  }
+
+  /**
+   * Free-form case search, for looking something up by hand.
+   *
+   * Every criterion is optional and they combine with `and`. An empty search
+   * is allowed and simply returns the most recent cases.
+   */
+  async searchRescues(criteria: RescueSearchCriteria): Promise<RescueSearchResult> {
+    const and: any[] = [];
+
+    const text = (criteria.client ?? '').trim();
+    if (text) {
+      // Substring rather than exact: a hand search is usually a half-remembered
+      // name, which is the opposite of the client-history lookup above.
+      and.push({
+        or: [
+          { client: { iLike: `%${text}%` } },
+          { clientNick: { iLike: `%${text}%` } },
+        ],
+      });
+    }
+
+    const system = (criteria.system ?? '').trim();
+    if (system) {
+      and.push({ system: { iLike: `%${system}%` } });
+    }
+
+    if (criteria.platform) and.push({ platform: { eq: criteria.platform } });
+    if (criteria.status) and.push({ status: { eq: criteria.status } });
+    if (criteria.outcome) and.push({ outcome: { eq: criteria.outcome } });
+    if (criteria.codeRed) and.push({ codeRed: { eq: true } });
+    if (criteria.from) and.push({ createdAt: { gte: criteria.from } });
+    if (criteria.to) and.push({ createdAt: { lte: criteria.to } });
+
+    // A rat is searched by name, but the API filters on rat UUIDs, so the
+    // name has to be resolved first. Two requests, and only when asked for.
+    let ratIds: string[] | undefined;
+    const ratName = (criteria.ratName ?? '').trim();
+    if (ratName) {
+      ratIds = await this.resolveRatIds(ratName);
+      if (ratIds.length === 0) {
+        return { total: 0, cases: [], note: `No commander matches "${ratName}".` };
+      }
+    }
+
+    const filter = and.length === 0 ? undefined : and.length === 1 ? and[0] : { and };
+
+    return this.queryRescues(filter, {
+      limit: criteria.limit ?? 25,
+      offset: criteria.offset ?? 0,
+      sort: '-createdAt',
+      rats: ratIds,
+    });
+  }
+
+  /** Commander UUIDs for a name, so `_rats` can be used. */
+  private async resolveRatIds(name: string): Promise<string[]> {
+    try {
+      const params = new URLSearchParams({
+        filter: JSON.stringify({ name: { iLike: `%${name}%` } }),
+        'page[limit]': '20',
+      });
+      const response = await fetch(`https://api.fuelrats.com/rats?${params}`, {
+        headers: this.authHeaders(),
+        cache: 'no-store',
+      });
+      if (!response.ok) return [];
+      const body = await response.json();
+      return (body.data ?? []).map((r: ApiRat) => r.id);
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * One rescue query, shared by the history panel and the search page.
+   *
+   * Deliberately does not use sparse fieldsets. `fields[rescues]=...` would
+   * cut the payload sharply and is in the API documentation, but it answers
+   * 500 on every endpoint it was tried against, so the full record is fetched
+   * and trimmed here instead.
+   */
+  private async queryRescues(
+    filter: any,
+    options: { limit?: number; offset?: number; sort?: string; rats?: string[] } = {},
+  ): Promise<RescueSearchResult> {
+    try {
+      const params = new URLSearchParams();
+      if (filter) params.set('filter', JSON.stringify(filter));
+      params.set('sort', options.sort ?? '-createdAt');
+      params.set('page[limit]', String(Math.min(options.limit ?? 25, 100)));
+      if (options.offset) params.set('page[offset]', String(options.offset));
+      // Resolves the assigned commanders in the same request.
+      params.set('include', 'rats');
+      if (options.rats?.length) params.set('_rats', options.rats.join(','));
+
+      const response = await fetch(`${this.apiUrl}?${params}`, {
+        headers: this.authHeaders(),
+        cache: 'no-store',
+      });
+
+      if (!response.ok) {
+        return { total: 0, cases: [], error: `The API answered ${response.status}.` };
+      }
+
+      const body = await response.json();
+
+      if (body.meta) {
+        if (typeof body.meta.rateLimitRemaining === 'number') {
+          this.rateLimitRemaining = body.meta.rateLimitRemaining;
+          this.rateLimitTotal = body.meta.rateLimitTotal;
+          this.rateLimitReset = new Date(body.meta.rateLimitReset);
+        }
+      }
+
+      const ratNames = new Map<string, string>();
+      for (const item of body.included ?? []) {
+        if (item?.type === 'rats') ratNames.set(item.id, item.attributes?.name ?? '?');
+      }
+
+      const cases = (body.data ?? []).map((r: ApiRescue) => this.toHistoryRescue(r, ratNames));
+
+      return {
+        // `total` is absent when nothing matched, so it cannot simply be read.
+        total: typeof body.meta?.total === 'number' ? body.meta.total : cases.length,
+        cases,
+      };
+    } catch (error) {
+      return { total: 0, cases: [], error: `Could not reach the API: ${error}` };
+    }
+  }
+
+  private authHeaders(): HeadersInit {
+    const headers: HeadersInit = { Accept: 'application/json' };
+    if (this.apiKey) headers['Authorization'] = `Bearer ${this.apiKey}`;
+    return headers;
+  }
+
+  private toHistoryRescue(rescue: ApiRescue, ratNames: Map<string, string>): HistoryRescue {
+    const a = rescue.attributes;
+    const rats = (rescue.relationships?.rats?.data ?? []).map(
+      (r) => ratNames.get(r.id) ?? r.id,
+    );
+    const limpet = rescue.relationships?.firstLimpet?.data;
+
+    return {
+      id: rescue.id,
+      caseNumber: typeof a.commandIdentifier === 'number' ? a.commandIdentifier : null,
+      client: a.client,
+      clientNick: a.clientNick,
+      clientLanguage: a.clientLanguage || null,
+      system: a.system,
+      platform: a.platform,
+      expansion: a.expansion,
+      codeRed: !!a.codeRed,
+      status: a.status,
+      outcome: a.outcome ?? null,
+      notes: a.notes ?? '',
+      title: a.title ?? null,
+      createdAt: a.createdAt,
+      updatedAt: a.updatedAt,
+      rats,
+      firstLimpet: limpet ? (ratNames.get(limpet.id) ?? limpet.id) : null,
+      landmark: a.data?.landmark ?? null,
+      quotes: a.quotes ?? [],
+      // The whole record, relationships included, so the detail view can show
+      // exactly what the API returned rather than a chosen subset. Rat ids are
+      // resolved alongside so the dump is readable without a second lookup.
+      raw: rescue,
+      ratsById: Object.fromEntries(
+        (rescue.relationships?.rats?.data ?? []).map((r) => [r.id, ratNames.get(r.id) ?? '?']),
+      ),
+    };
+  }
+
+  /** The paperwork page for a rescue. */
+  static paperworkUrl(id: string): string {
+    return `https://fuelrats.com/paperwork/${id}`;
+  }
+
+}
+
+/** A past rescue, flattened for display. `raw` backs the API-info toggle. */
+export interface HistoryRescue {
+  id: string;
+  caseNumber: number | null;
+  client: string;
+  clientNick: string;
+  clientLanguage: string | null;
+  system: string;
+  platform: string;
+  expansion: string;
+  codeRed: boolean;
+  status: string;
+  outcome: string | null;
+  notes: string;
+  title: string | null;
+  createdAt: string;
+  updatedAt: string;
+  rats: string[];
+  firstLimpet: string | null;
+  landmark: { name: string; distance: number } | null;
+  quotes: ApiQuote[];
+  /** The complete rescue object as the API returned it. */
+  raw: ApiRescue;
+  /** Rat id → CMDR name, so the raw dump can be read without a lookup. */
+  ratsById: Record<string, string>;
+}
+
+export interface RescueSearchResult {
+  total: number;
+  cases: HistoryRescue[];
+  /** Set when the lookup failed rather than found nothing. */
+  error?: string;
+  /** Set when the search was answerable but ruled itself out. */
+  note?: string;
+}
+
+export interface RescueSearchCriteria {
+  client?: string;
+  system?: string;
+  ratName?: string;
+  platform?: string;
+  status?: string;
+  outcome?: string;
+  codeRed?: boolean;
+  /** ISO timestamps. */
+  from?: string;
+  to?: string;
+  limit?: number;
+  offset?: number;
 }
 
 export const fuelRatsApi = new FuelRatsApiService();

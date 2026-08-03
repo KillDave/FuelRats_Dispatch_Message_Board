@@ -3,6 +3,7 @@ import disconnectIcon from './image/Disconnect_Icon.png';
 import type { Case, CaseStatus } from './DispatchBoard';
 import { CopyableSystem } from './CopyableSystem';
 import { CaseNotes } from './CaseNotes';
+import { ClientHistory } from './CaseHistory';
 import { distanceToSeconds, SCO_SHIPS, type ScoShipKey } from '../services/scTime';
 import { translateText, toDeepLTargetLang, getDeepLApiKey, setDeepLApiKey } from '../services/translationService';
 import { langblyTranslate, toLangblyTargetLang, getLangblyApiKey, setLangblyApiKey } from '../services/langblyService';
@@ -974,6 +975,14 @@ export function CaseWindow({
               )}
             </div>
           )}
+
+          {/* Collapsed by default: it costs a request when opened, and the
+              answer is context rather than something needed on every case. */}
+          <ClientHistory
+            clientName={caseData.clientName}
+            ircNick={caseData.ircNick}
+            currentApiId={caseData.apiId}
+          />
 
           {/* Messages */}
           <div
