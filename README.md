@@ -4,7 +4,9 @@ A browser-based dispatch tool for Fuel Rats dispatchers, connecting to the FuelR
 
 ## Requirements
 
-- A FuelRats account - Must be a Drilled Rat
+- A FuelRats account in the **Drilled Rat** group — this is checked, not merely
+  expected: the board reads your permissions on load and will not open without
+  `dispatch.read` and `dispatch.write`
 - [AdiIRC](https://www.adiirc.com/) (or HexChat — see [IRC client setup](#irc-client-setup))
 - Python 3 (for the local web server)
 - `bridge.exe` (pre-built, included in the release)
@@ -115,6 +117,15 @@ Click **Login** and you'll be redirected to [fuelrats.com](https://fuelrats.com)
 ---
 
 ## Changelog
+
+### v1.1.6
+- The board verifies your account before it loads, requiring `dispatch.read` and `dispatch.write` — the permissions the **Drilled Rat** group carries. Anyone without them gets a screen pointing at how to get drilled or trained
+- Journal reading is opt-in per account instead of adding every commander it finds. The import only fills gaps, so enabling it cannot clobber an account set up by hand, and disabling it leaves that account in place and stops updating it
+- Case notes collapse runs of join/leave lines into one entry, so a client reconnecting repeatedly no longer buries the case
+- Click a quote in the case notes to send it back as `!sub`, line and index already filled in
+- Client-side sandbox at `#clienttest` for working on the case window without a live rescue
+- Dropped twelve dependencies that were installed but never imported — `@mui/*`, `@emotion/*`, `date-fns`, `motion`, `react-dnd`, `react-slick`, `react-popper` among them
+- Earlier releases of this fork were removed: the check lives in the app, so an older build was a way around it rather than an older version of it
 
 ### v1.1.5
 - Rat Mode reads the game journal: your commanders are added automatically with their last system and current ship, taken from the game's own `Loadout` event
