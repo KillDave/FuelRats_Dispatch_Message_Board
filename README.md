@@ -4,8 +4,7 @@ A browser-based dispatch tool for Fuel Rats dispatchers, connecting to the FuelR
 
 ## Requirements
 
-- A FuelRats account in the **Drilled Rat** group — this is checked, not merely
-  expected: the board reads your permissions on load and will not open without
+- A FuelRats account in the **Drilled Rat** group.
   `dispatch.read` and `dispatch.write`
 - [AdiIRC](https://www.adiirc.com/) (or HexChat — see [IRC client setup](#irc-client-setup))
 - Python 3 (for the local web server)
