@@ -24,8 +24,10 @@ function outcomeTone(rescue: HistoryRescue): string {
       return 'text-emerald-300 border-emerald-500/50 bg-emerald-500/10';
     case 'failure':
       return 'text-red-300 border-red-500/50 bg-red-500/10';
-    // `other`, `invalid` and a null outcome on a closed case all mean the
-    // rescue did not simply succeed, which is the thing worth noticing.
+    // `purge` (what !md sets), `other`, `invalid` and a null outcome on a
+    // closed case all mean the rescue did not simply succeed, which is the
+    // thing worth noticing. They are not failures either, so amber rather
+    // than red.
     default:
       return 'text-amber-300 border-amber-500/50 bg-amber-500/10';
   }

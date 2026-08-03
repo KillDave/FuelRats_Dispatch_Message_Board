@@ -19,7 +19,10 @@ const PAGE_SIZE = 25;
 
 const PLATFORMS = ['', 'pc', 'xb', 'ps'];
 const STATUSES = ['', 'open', 'inactive', 'closed'];
-const OUTCOMES = ['', 'success', 'failure', 'invalid', 'other'];
+// The five the API actually stores. `purge` is what !md sets and is the second
+// most common outcome after success -- 23 of the last 100 cases -- so leaving
+// it out made the filter quietly unable to find a large slice of the archive.
+const OUTCOMES = ['', 'success', 'failure', 'purge', 'invalid', 'other'];
 
 interface CaseSearchPageProps {
   onBack: () => void;
