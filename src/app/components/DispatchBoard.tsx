@@ -179,6 +179,56 @@ function formatResetIn(seconds: number): string {
   return m >= 10 ? `${m}m` : m > 0 ? `${m}m ${s}s` : `${s}s`;
 }
 
+/** How far back the burn rate looks: what is being spent now, not this hour. */
+const BURN_WINDOW_MS = 60_000;
+
+/** A full window before the first figure, so every figure is measured alike. */
+const BURN_MIN_SPAN_S = 60;
+
+/**
+ * Readings of the remaining allowance, newest last.
+ *
+ * Deliberately outside the component. React unmounts the board entirely when
+ * the case search opens, which took the samples with it and left the estimate
+ * blank for a minute on the way back. At module scope they outlive any
+ * mounting, so navigating away and returning costs nothing.
+ */
+let burnSamples: Array<{ t: number; remaining: number }> = [];
+
+/**
+ * Requests per hour, measured over the last minute.
+ *
+ * Called once a second with the current reading. Returns null until a full
+ * window has been gathered.
+ *
+ * The allowance refills in one step on the hour, so a rise in `remaining` is
+ * the reset rather than negative spending. The samples are dropped at that
+ * point and the estimate starts afresh -- there is no honest way to average
+ * across a boundary where the meter went backwards.
+ */
+function trackBurnRate(remaining: number): number | null {
+  const now = Date.now();
+  const last = burnSamples[burnSamples.length - 1];
+
+  if (last && remaining > last.remaining) {
+    burnSamples = [];
+  }
+
+  burnSamples.push({ t: now, remaining });
+
+  // One sample from beyond the cutoff is kept, so the span stays a full
+  // minute instead of shrinking to whatever survived the trim.
+  while (burnSamples.length > 2 && burnSamples[1].t <= now - BURN_WINDOW_MS) {
+    burnSamples.shift();
+  }
+
+  const oldest = burnSamples[0];
+  const span = (now - oldest.t) / 1000;
+  if (span < BURN_MIN_SPAN_S) return null;
+
+  return Math.round(((oldest.remaining - remaining) / span) * 3600);
+}
+
 const DEFAULT_BUTTON_GROUPS: QuickMessageGroup[] = [RESCUE_DEFAULT, dispatchMessages];
 
 function loadButtonGroups(): QuickMessageGroup[] {
@@ -421,6 +471,10 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
   const [isLoadingApi, setIsLoadingApi] = useState(false);
   const [rateLimitRemaining, setRateLimitRemaining] = useState(0);
   const [secondsToReset, setSecondsToReset] = useState(0);
+  const [rateLimitTotal, setRateLimitTotal] = useState(RATE_LIMIT_TOTAL);
+  // Seeded from the samples that survived the last unmount, so returning from
+  // the case search shows a figure immediately rather than after a minute.
+  const [burnPerHour, setBurnPerHour] = useState<number | null>(null);
   const [alertSettings, setAlertSettings] = useState<AlertSettings>(loadAlertSettings);
   /** Cases already alerted for, so a re-render or refetch cannot ping twice. */
   const alertedRef = useRef<Set<string>>(new Set());
@@ -782,12 +836,16 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
     const updateRateLimit = () => {
       const info = fuelRatsApi.getRateLimitInfo();
       setRateLimitRemaining(info.remaining);
-      
+      // The API states its own allowance, so prefer it to the constant.
+      if (info.total > 0) setRateLimitTotal(info.total);
+
       if (info.resetDate) {
         const now = new Date();
         const seconds = Math.max(0, Math.floor((info.resetDate.getTime() - now.getTime()) / 1000));
         setSecondsToReset(seconds);
       }
+
+      setBurnPerHour(trackBurnRate(info.remaining));
     };
 
     updateRateLimit();
@@ -1489,30 +1547,52 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
                       once a second. Amber under a quarter left, red under a
                       tenth -- the board's own polling is about 10% of the
                       allowance, so anything near those is something else. */}
-                  {useApiData && rateLimitRemaining > 0 && (
-                    <div
-                      className="flex items-center gap-1.5"
-                      title={`${rateLimitRemaining} of ${RATE_LIMIT_TOTAL} API requests left this hour`}
-                    >
-                      <span
-                        className={`text-xs ${
-                          rateLimitRemaining < RATE_LIMIT_TOTAL * 0.1
-                            ? 'text-red-400'
-                            : rateLimitRemaining < RATE_LIMIT_TOTAL * 0.25
-                              ? 'text-yellow-400'
-                              : 'text-slate-400'
-                        }`}
+                  {useApiData && rateLimitRemaining > 0 && (() => {
+                    const rate = burnPerHour;
+                    return (
+                      <div
+                        className="flex items-center gap-1.5"
+                        title={
+                          `${rateLimitRemaining.toLocaleString()} of ${rateLimitTotal.toLocaleString()} ` +
+                          `API requests left this hour` +
+                          (rate === null ? '' : `\nSpending ${rate.toLocaleString()}/hour over the last minute`)
+                        }
                       >
-                        {rateLimitRemaining.toLocaleString()}
-                        <span className="text-slate-600"> left</span>
-                      </span>
-                      {secondsToReset > 0 && (
-                        <span className="text-xs text-slate-600">
-                          · {formatResetIn(secondsToReset)}
+                        <span
+                          className={`text-xs ${
+                            rateLimitRemaining < rateLimitTotal * 0.1
+                              ? 'text-red-400'
+                              : rateLimitRemaining < rateLimitTotal * 0.25
+                                ? 'text-yellow-400'
+                                : 'text-slate-400'
+                          }`}
+                        >
+                          {rateLimitRemaining.toLocaleString()}
+                          <span className="text-slate-600"> left</span>
                         </span>
-                      )}
-                    </div>
-                  )}
+                        {secondsToReset > 0 && (
+                          <span className="text-xs text-slate-600">
+                            · {formatResetIn(secondsToReset)}
+                          </span>
+                        )}
+                        {rate !== null && (
+                          // Amber once the pace would spend three quarters of
+                          // the allowance, red once it would spend all of it.
+                          <span
+                            className={`text-xs ${
+                              rate >= rateLimitTotal
+                                ? 'text-red-400'
+                                : rate >= rateLimitTotal * 0.75
+                                  ? 'text-yellow-400'
+                                  : 'text-slate-600'
+                            }`}
+                          >
+                            · ~{rate.toLocaleString()}/hr
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
                 <span className="text-slate-500 text-xs">{isConnectionPanelOpen ? '▼︎' : '▶︎'}</span>
               </div>
