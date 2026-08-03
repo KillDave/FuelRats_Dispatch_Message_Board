@@ -406,6 +406,10 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
   // Tracks the rat IRC nick used in the most recent !gofr/!go command per case,
   // so we can correlate with MechaSqueak's response to learn nick → CMDR name
   const lastRatCommandRef = useRef<Map<string, { nicks: string[]; time: number }>>(new Map());
+  // Previous status per case, so the inactive-triggered auto-hide below only
+  // fires on the open/assigned/code-red → inactive transition, not on every
+  // render while a case sits inactive.
+  const prevStatusRef = useRef<Map<string, CaseStatus>>(new Map());
 
   // IRC state
   const [ircStatus, setIrcStatus] = useState<IRCConnectionStatus>('disconnected');
@@ -705,6 +709,34 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
       const filtered = new Set([...prev].filter((id) => caseIds.has(id)));
       return filtered.size === prev.size ? prev : filtered;
     });
+  }, [cases]);
+
+  // Auto-hide a case the moment it goes inactive, same as toggling it off in
+  // the sidebar. One-shot on the transition, not a standing rule: if a
+  // dispatcher (or the client) brings it back active, it stays hidden until
+  // someone opts back in by clicking it in the sidebar. Reusing the ordinary
+  // toggle state means a manual re-toggle just works, with nothing here to
+  // fight it on the next case update.
+  useEffect(() => {
+    const goneInactive: string[] = [];
+    cases.forEach((c) => {
+      const prevStatus = prevStatusRef.current.get(c.id);
+      if (prevStatus && prevStatus !== 'inactive' && c.status === 'inactive') {
+        goneInactive.push(c.id);
+      }
+      prevStatusRef.current.set(c.id, c.status);
+    });
+    const currentIds = new Set(cases.map((c) => c.id));
+    for (const id of prevStatusRef.current.keys()) {
+      if (!currentIds.has(id)) prevStatusRef.current.delete(id);
+    }
+    if (goneInactive.length > 0) {
+      setToggledCaseIds((prev) => {
+        const next = new Set(prev);
+        goneInactive.forEach((id) => next.delete(id));
+        return next;
+      });
+    }
   }, [cases]);
 
   // Effect to update rate limit display every second

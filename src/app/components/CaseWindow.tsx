@@ -98,6 +98,7 @@ export function CaseWindow({
   const [langblyApiKey, setLangblyApiKeyState] = useState(() => getLangblyApiKey());
   const [showLangblyKeyInput, setShowLangblyKeyInput] = useState(false);
   const [rootPopoverOpen, setRootPopoverOpen] = useState<Record<number, boolean>>({});
+  const [editingQuote, setEditingQuote] = useState<{ index: number; text: string } | null>(null);
   const [subPopoverOpen, setSubPopoverOpen] = useState<Record<string, boolean>>({});
   const [openRatMenuId, setOpenRatMenuId] = useState<string | null>(null);
   const [stationHover, setStationHover] = useState(false);
@@ -963,7 +964,12 @@ export function CaseWindow({
               </button>
               {!notesCollapsed && (
                 <div className="px-3 pb-2 max-h-40 overflow-y-auto">
-                  <CaseNotes injections={caseData.injections} compact />
+                  <CaseNotes
+                    injections={caseData.injections}
+                    compact
+                    showIndex
+                    onEditQuote={(index, text) => setEditingQuote({ index, text })}
+                  />
                 </div>
               )}
             </div>
@@ -1300,6 +1306,51 @@ export function CaseWindow({
                 className="bg-orange-600 hover:bg-orange-700 flex-shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Send className="w-4 h-4" />
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {editingQuote && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+          onClick={() => setEditingQuote(null)}
+        >
+          <div
+            className="bg-slate-900 border border-slate-700 rounded-lg p-6 w-full max-w-lg shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-bold text-orange-500">Edit Quote #{editingQuote.index}</h2>
+              <button onClick={() => setEditingQuote(null)} className="text-slate-400 hover:text-white">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <textarea
+              autoFocus
+              value={editingQuote.text}
+              onChange={(e) => setEditingQuote({ index: editingQuote.index, text: e.target.value })}
+              rows={4}
+              className="w-full bg-slate-800/70 border border-slate-700 rounded p-2 text-sm text-white placeholder:text-slate-500 resize-none"
+            />
+            <div className="flex justify-end gap-2 mt-4">
+              <Button
+                variant="ghost"
+                onClick={() => setEditingQuote(null)}
+                className="text-slate-300 hover:text-white"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={() => {
+                  onAddMessage(caseData.id, `!sub ${caseNumber} ${editingQuote.index} ${editingQuote.text}`, '#ratchat');
+                  setEditingQuote(null);
+                }}
+                disabled={!ircConnected || !editingQuote.text.trim()}
+                className="bg-orange-600 hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Submit
               </Button>
             </div>
           </div>

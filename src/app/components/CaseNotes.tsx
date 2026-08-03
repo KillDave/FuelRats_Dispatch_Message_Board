@@ -26,16 +26,97 @@ function parseNote(text: string) {
 const time = (d: Date) =>
   d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
 
-export function CaseNotes({ injections, compact = false }: { injections: Injection[]; compact?: boolean }) {
+/**
+ * MechaSqueak logs a quote each time the client's client leaves or rejoins the
+ * rescue channel, verbatim and with no `<nick>` wrapper. A flaky connection
+ * turns that into a run of near-identical lines that says nothing beyond "still
+ * bouncing" -- collapsed into one row reporting the final state and how many
+ * messages were folded in.
+ */
+const PRESENCE_TEXT: Record<string, 'left' | 'rejoined'> = {
+  'Client left the rescue channel': 'left',
+  'Client rejoined the rescue channel': 'rejoined',
+};
+
+type NoteEntry = { kind: 'note'; note: Injection; index: number };
+type PresenceGroupEntry = { kind: 'presence-group'; notes: Injection[]; indices: number[]; finalState: 'left' | 'rejoined' };
+
+function groupNotes(injections: Injection[]): (NoteEntry | PresenceGroupEntry)[] {
+  const result: (NoteEntry | PresenceGroupEntry)[] = [];
+  let i = 0;
+  while (i < injections.length) {
+    const state = PRESENCE_TEXT[injections[i].text.trim()];
+    if (!state) {
+      result.push({ kind: 'note', note: injections[i], index: i });
+      i++;
+      continue;
+    }
+    const indices = [i];
+    let j = i + 1;
+    while (j < injections.length && PRESENCE_TEXT[injections[j].text.trim()]) {
+      indices.push(j);
+      j++;
+    }
+    if (indices.length === 1) {
+      result.push({ kind: 'note', note: injections[i], index: i });
+    } else {
+      const notes = indices.map(idx => injections[idx]);
+      result.push({ kind: 'presence-group', notes, indices, finalState: PRESENCE_TEXT[notes[notes.length - 1].text.trim()]! });
+    }
+    i = j;
+  }
+  return result;
+}
+
+export function CaseNotes({
+  injections,
+  compact = false,
+  showIndex = false,
+  onEditQuote,
+}: {
+  injections: Injection[];
+  compact?: boolean;
+  showIndex?: boolean;
+  /** Dispatch-only: clicking a quote offers to !sub its text. Not offered for collapsed presence groups. */
+  onEditQuote?: (index: number, currentText: string) => void;
+}) {
   if (injections.length === 0) return null;
 
   return (
     <div className={`space-y-1.5 ${compact ? 'text-xs' : 'text-sm'}`}>
-      {injections.map(note => {
+      {groupNotes(injections).map(entry => {
+        if (entry.kind === 'presence-group') {
+          const last = entry.notes[entry.notes.length - 1];
+          return (
+            <div key={last.id} className="flex gap-2">
+              <span className="text-slate-600 font-mono text-xs flex-shrink-0 pt-0.5">{time(last.createdAt)}</span>
+              {showIndex && (
+                <span className="text-slate-600 font-mono text-xs flex-shrink-0 pt-0.5">
+                  #{entry.indices[0]}–{entry.indices[entry.indices.length - 1]}
+                </span>
+              )}
+              <div className="min-w-0 flex-1">
+                <p className="break-words text-slate-500 italic">
+                  Client {entry.finalState} the rescue channel ({entry.notes.length} messages)
+                </p>
+              </div>
+            </div>
+          );
+        }
+
+        const { note, index } = entry;
         const { speaker, body, translation } = parseNote(note.text);
+        const clickable = !!onEditQuote;
         return (
-          <div key={note.id} className="flex gap-2">
+          <div
+            key={note.id}
+            className={`flex gap-2 -mx-1 px-1 rounded ${clickable ? 'cursor-pointer hover:bg-slate-700/40' : ''}`}
+            onClick={clickable ? () => onEditQuote(index, note.text) : undefined}
+          >
             <span className="text-slate-600 font-mono text-xs flex-shrink-0 pt-0.5">{time(note.createdAt)}</span>
+            {showIndex && (
+              <span className="text-slate-600 font-mono text-xs flex-shrink-0 pt-0.5">#{index}</span>
+            )}
             <div className="min-w-0 flex-1">
               {/* Everything the API sends as a quote is rendered the same way.
                   Judging which lines matter needs a vocabulary of call-in tokens
