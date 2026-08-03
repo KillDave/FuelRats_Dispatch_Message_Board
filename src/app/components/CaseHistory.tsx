@@ -205,6 +205,63 @@ export function RescueList({ cases }: { cases: HistoryRescue[] }) {
   );
 }
 
+/**
+ * How long a client's history is reused before being asked for again.
+ *
+ * Long, because the answer barely moves: it only changes when one of that
+ * client's cases closes, and a dispatcher looking at the same case for ten
+ * minutes does not need it re-fetched.
+ */
+const HISTORY_TTL_MS = 10 * 60_000;
+
+/**
+ * Results and in-flight lookups, keyed by what was asked.
+ *
+ * Outside the component on purpose. Hiding a case unmounts its window and
+ * showing it again mounts a fresh one, so without this every hide-and-show
+ * cycle spent another request re-asking a question already answered. The
+ * in-flight half does the same for two windows opening at once on the same
+ * client -- one request, both waiting on it.
+ */
+const historyCache = new Map<string, { at: number; result: RescueSearchResult }>();
+const historyInFlight = new Map<string, Promise<RescueSearchResult>>();
+
+function historyKey(client: string, nick?: string, excludeId?: string): string {
+  return `${client.toLowerCase()}|${(nick ?? '').toLowerCase()}|${excludeId ?? ''}`;
+}
+
+/** Cached lookup. Shares one request between everything asking at once. */
+function lookupHistory(
+  client: string,
+  nick: string | undefined,
+  excludeId: string | undefined,
+): Promise<RescueSearchResult> {
+  const key = historyKey(client, nick, excludeId);
+
+  const hit = historyCache.get(key);
+  if (hit && Date.now() - hit.at < HISTORY_TTL_MS) {
+    return Promise.resolve(hit.result);
+  }
+
+  const pending = historyInFlight.get(key);
+  if (pending) return pending;
+
+  const request = fuelRatsApi
+    .fetchClientHistory(client, nick, { limit: 10, excludeId })
+    .then((result) => {
+      // A failed lookup is not cached: it would keep being returned for ten
+      // minutes when the next attempt might well succeed.
+      if (!result.error) historyCache.set(key, { at: Date.now(), result });
+      return result;
+    })
+    .finally(() => {
+      historyInFlight.delete(key);
+    });
+
+  historyInFlight.set(key, request);
+  return request;
+}
+
 interface ClientHistoryProps {
   clientName: string;
   ircNick?: string;
@@ -231,15 +288,15 @@ export function ClientHistory({ clientName, ircNick, currentApiId }: ClientHisto
     // refusal costs no request and leaks nothing on the way to being refused.
     if (!clientName || access !== 'allowed') return;
 
+    // Resolves without a request when this client was looked up recently, so
+    // hiding and re-showing a case costs nothing.
     setState('loading');
-    fuelRatsApi
-      .fetchClientHistory(clientName, ircNick, { limit: 10, excludeId: currentApiId })
-      .then((r) => {
-        if (!cancelled) {
-          setResult(r);
-          setState('done');
-        }
-      });
+    lookupHistory(clientName, ircNick, currentApiId).then((r) => {
+      if (!cancelled) {
+        setResult(r);
+        setState('done');
+      }
+    });
 
     return () => {
       cancelled = true;
