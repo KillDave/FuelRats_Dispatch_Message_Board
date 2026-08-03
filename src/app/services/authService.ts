@@ -79,4 +79,24 @@ export const authService = {
   logout(): void {
     this.clearToken();
   },
+
+  // ── Permissions ───────────────────────────────────────────────────────────
+
+  /**
+   * The scopes granted to the token (SCOPES above) are just what this app asked
+   * for. What a user can actually do comes from their group memberships, which
+   * GET /profile reports back as `meta.permissions` regardless of token scope.
+   */
+  async getPermissions(): Promise<string[]> {
+    const token = this.getToken();
+    if (!token) return [];
+
+    const res = await fetch('https://api.fuelrats.com/profile', {
+      headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    const json = await res.json();
+    return (json.data?.meta?.permissions as string[] | undefined) ?? [];
+  },
 };
