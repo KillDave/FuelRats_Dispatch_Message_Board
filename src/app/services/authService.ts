@@ -30,9 +30,11 @@ export const authService = {
    * Returns the access token on success, or throws on error / state mismatch.
    */
   handleCallback(): string {
-    // Implicit grant delivers the token in the URL fragment (#), not the query
-    // string, so it is never sent to servers or stored in browser history.
-    const params = new URLSearchParams(window.location.hash.substring(1));
+    // Textbook implicit grant delivers the token in the URL fragment (#), but
+    // FuelRats' /authorize actually redirects with it in the query string
+    // instead -- confirmed via the raw redirect Location header, which comes
+    // back as `/callback?access_token=...&state=...`, not `#access_token=...`.
+    const params = new URLSearchParams(window.location.search);
 
     const error = params.get('error');
     if (error) {
