@@ -5,7 +5,6 @@ A browser-based dispatch tool for Fuel Rats dispatchers, connecting to the FuelR
 ## Requirements
 
 - A FuelRats account in the **Drilled Rat** group.
-- Case history and search additionally require the **Drilled Dispatch** group.
 - [AdiIRC](https://www.adiirc.com/) (or HexChat — see [IRC client setup](#irc-client-setup))
 - Python 3 (for the local web server)
 - `bridge.exe` (pre-built, included in the release)
@@ -83,16 +82,15 @@ Click **Login** and you'll be redirected to [fuelrats.com](https://fuelrats.com)
 - Per-case windows with platform, system, language, and landmark distance badges
 - Scoopable star status fetched from EDSM
 
-**Case history** *(Drilled Dispatch only)*
+**Case history**
 - Previous cases for the client, on each case window — matched on both `client`
   and `clientNick`, since the two disagree on roughly a quarter of rescues
 - Only closed rescues count as history; the case on screen never lists itself
 - Every row expands to the full API record, the case log, and a paperwork link
 - **Menu → Case search** searches the whole archive by client, system, rat,
   platform, status, outcome, date range or code red
-- Hidden entirely for anyone outside the group, rather than shown and refused.
-  A client is free text with no account behind it, so a name match is possible
-  history and is labelled as such
+- A client is free text with no account behind it, so a name match is possible
+  history rather than a confirmed identity, and is labelled as such
 
 **Rat Tracking**
 - Rat progress bar (FR / WR / BC / FUEL) with cascade logic
@@ -127,6 +125,10 @@ Click **Login** and you'll be redirected to [fuelrats.com](https://fuelrats.com)
 ---
 
 ## Changelog
+
+### Unreleased
+- Case history and case search are open to every drilled rat. They were behind an additional **Drilled Dispatch** requirement, which has been removed. The board's own **Drilled Rat** requirement is unchanged
+- Removed the second group lookup and the `useDispatcher` hook along with it
 
 ### v1.1.7
 - Case history on each case: previous rescues for the client, matched on both `client` and `clientNick`, with the full API record, the case log and a paperwork link behind a toggle. Limited to **Drilled Dispatch**, and hidden rather than refused for anyone else

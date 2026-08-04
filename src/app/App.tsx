@@ -7,7 +7,6 @@ import { ClientTestPage } from '@/app/components/ClientTestPage';
 import { TrainingRequiredScreen } from '@/app/components/TrainingRequiredScreen';
 import { CaseSearchPage } from '@/app/components/CaseSearchPage';
 import { authService } from '@/app/services/authService';
-import { useDispatcher, resetDispatcherCache } from '@/app/hooks/useDispatcher';
 
 
 function handleOAuthCallback(): boolean {
@@ -30,7 +29,6 @@ type AccessState = 'checking' | 'granted' | 'denied';
 export default function App() {
   const [authenticated, setAuthenticated] = useState(() => authService.isAuthenticated());
   const [hash, setHash] = useState(() => window.location.hash);
-  const dispatcher = useDispatcher();
   const [access, setAccess] = useState<AccessState>('checking');
 
   useEffect(() => {
@@ -62,11 +60,9 @@ export default function App() {
   }, [authenticated]);
 
   const handleLogout = () => {
+    // authService.clearToken drops the cached group lookup with the token, so
+    // signing back in as a different account is judged on that account.
     authService.logout();
-    // The dispatcher answer is cached for the life of the page, so it has to
-    // be dropped here: signing back in as a different account would otherwise
-    // inherit whether the *previous* one was a dispatch.
-    resetDispatcherCache();
     setAuthenticated(false);
   };
 
@@ -94,10 +90,9 @@ export default function App() {
     );
   }
 
-  // Only a route for a drilled dispatch. For anyone else it is not refused,
-  // it simply is not there: the hash falls through and the board renders as
-  // though nothing was typed.
-  if (hash === '#search' && dispatcher === 'allowed') {
+  // Open to anyone the board itself let in. The Drilled Rat check in this
+  // component is the gate; there is no second one.
+  if (hash === '#search') {
     return (
       <div className="h-[100dvh] flex flex-col">
         <CaseSearchPage onBack={() => { window.location.hash = ''; setHash(''); }} />

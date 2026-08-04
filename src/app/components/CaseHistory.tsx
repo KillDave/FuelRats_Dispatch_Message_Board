@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { ChevronDown, ChevronRight, History, AlertTriangle, Loader2, ExternalLink } from 'lucide-react';
 import { fuelRatsApi } from '@/app/services/fuelRatsApi';
 import type { HistoryRescue, RescueSearchResult } from '@/app/services/fuelRatsApi';
-import { useDispatcher } from '@/app/hooks/useDispatcher';
 
 /**
  * Past rescues, for the panel on a live case and for the search page.
@@ -280,13 +279,10 @@ export function ClientHistory({ clientName, ircNick, currentApiId }: ClientHisto
   const [state, setState] = useState<'idle' | 'loading' | 'done'>('idle');
   const [result, setResult] = useState<RescueSearchResult | null>(null);
   const [expanded, setExpanded] = useState(false);
-  const access = useDispatcher();
 
   useEffect(() => {
     let cancelled = false;
-    // Nothing is fetched until the account is known to be a dispatcher, so a
-    // refusal costs no request and leaks nothing on the way to being refused.
-    if (!clientName || access !== 'allowed') return;
+    if (!clientName) return;
 
     // Resolves without a request when this client was looked up recently, so
     // hiding and re-showing a case costs nothing.
@@ -301,17 +297,9 @@ export function ClientHistory({ clientName, ircNick, currentApiId }: ClientHisto
     return () => {
       cancelled = true;
     };
-  }, [clientName, ircNick, currentApiId, access]);
+  }, [clientName, ircNick, currentApiId]);
 
   const count = result?.cases.length ?? 0;
-
-  // Hidden outright for anyone who is not a drilled dispatch -- not greyed
-  // out, and not explained. Past cases carry clients' own words and
-  // dispatchers' private notes, so this is a narrower audience than the board
-  // as a whole, and someone without the group has no reason to know the panel
-  // is there. `unknown` hides it too: a lookup that could not be confirmed is
-  // not a reason to show the data anyway.
-  if (access !== 'allowed') return null;
 
   return (
     // flex-shrink-0 so the header keeps its height, and the body below scrolls
