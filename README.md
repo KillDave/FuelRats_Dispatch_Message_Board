@@ -4,9 +4,8 @@ A browser-based dispatch tool for Fuel Rats dispatchers, connecting to the FuelR
 
 ## Requirements
 
-- A FuelRats account in the **Drilled Rat** group — this is checked, not merely
-  expected: the board reads your permissions on load and will not open without
-  `dispatch.read` and `dispatch.write`
+- A FuelRats account in the **Drilled Rat** group.
+- Case history and search additionally require the **Drilled Dispatch** group.
 - [AdiIRC](https://www.adiirc.com/) (or HexChat — see [IRC client setup](#irc-client-setup))
 - Python 3 (for the local web server)
 - `bridge.exe` (pre-built, included in the release)
@@ -84,6 +83,17 @@ Click **Login** and you'll be redirected to [fuelrats.com](https://fuelrats.com)
 - Per-case windows with platform, system, language, and landmark distance badges
 - Scoopable star status fetched from EDSM
 
+**Case history** *(Drilled Dispatch only)*
+- Previous cases for the client, on each case window — matched on both `client`
+  and `clientNick`, since the two disagree on roughly a quarter of rescues
+- Only closed rescues count as history; the case on screen never lists itself
+- Every row expands to the full API record, the case log, and a paperwork link
+- **Menu → Case search** searches the whole archive by client, system, rat,
+  platform, status, outcome, date range or code red
+- Hidden entirely for anyone outside the group, rather than shown and refused.
+  A client is free text with no account behind it, so a name match is possible
+  history and is labelled as such
+
 **Rat Tracking**
 - Rat progress bar (FR / WR / BC / FUEL) with cascade logic
 - IRC nick learning via MechaSqueak relay messages
@@ -117,6 +127,13 @@ Click **Login** and you'll be redirected to [fuelrats.com](https://fuelrats.com)
 ---
 
 ## Changelog
+
+### v1.1.7
+- Case history on each case: previous rescues for the client, matched on both `client` and `clientNick`, with the full API record, the case log and a paperwork link behind a toggle. Limited to **Drilled Dispatch**, and hidden rather than refused for anyone else
+- **Menu → Case search** across the whole archive — client, system, rat, platform, status, outcome, date range, code red — paginated, same group requirement
+- The board gate now reads the **Drilled Rat group** rather than the `dispatch.read`/`dispatch.write` permissions. Those come from that same group so the two agree today, but they are named after the dispatch board while being granted by the rat group, and would have changed meaning silently if that were ever tidied up
+- Both gates share one `/profile` lookup instead of asking twice on every load
+- Fixed the bridge treating a closed browser as a fault: a tab closing raised `ConnectionClosedOK` out of `websocket.send` and was reported as an error reading from IRC, which is the opposite end of the bridge
 
 ### v1.1.6
 - The board verifies your account before it loads, requiring `dispatch.read` and `dispatch.write` — the permissions the **Drilled Rat** group carries. Anyone without them gets a screen pointing at how to get drilled or trained

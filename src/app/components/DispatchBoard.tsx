@@ -4,7 +4,8 @@ import { RatBoard } from './RatBoard';
 import { MessageEditorPage } from './MessageEditorPage';
 import { CopyableSystem } from './CopyableSystem';
 import { Button } from '@/app/components/ui/button';
-import { Eye, EyeOff, Sidebar, User, MapPin, AlertTriangle, Clock, LogOut, Plus, Shield, ChevronDown, MessageSquare, Settings, Bell } from 'lucide-react';
+import { useDispatcher } from '@/app/hooks/useDispatcher';
+import { Eye, EyeOff, Sidebar, User, MapPin, AlertTriangle, Clock, LogOut, Plus, Shield, ChevronDown, MessageSquare, Settings, Bell, Search } from 'lucide-react';
 import {
   ALERT_PLATFORMS, alertNewCase, desktopPermission, loadAlertSettings,
   requestDesktopPermission, saveAlertSettings, testAlert,
@@ -162,6 +163,72 @@ const canSeeColonization = (platform: string) =>
   platform.includes('Odyssey') || platform.includes('Horizons');
 
 const RESCUE_DEFAULT: QuickMessageGroup = { label: 'RESCUE', messages: rescueMessages };
+/**
+ * The FuelRats hourly request allowance.
+ *
+ * Only used to colour the counter. The live figures come from the API on
+ * every response -- `meta.rateLimitTotal` alongside `rateLimitRemaining` --
+ * so this is a fallback for the shading, not the number on screen.
+ */
+const RATE_LIMIT_TOTAL = 3600;
+
+/** "52m" or "8m 20s" once it is close, since the last minute is the tense one. */
+function formatResetIn(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return m >= 10 ? `${m}m` : m > 0 ? `${m}m ${s}s` : `${s}s`;
+}
+
+/** How far back the burn rate looks: what is being spent now, not this hour. */
+const BURN_WINDOW_MS = 60_000;
+
+/** A full window before the first figure, so every figure is measured alike. */
+const BURN_MIN_SPAN_S = 60;
+
+/**
+ * Readings of the remaining allowance, newest last.
+ *
+ * Deliberately outside the component. React unmounts the board entirely when
+ * the case search opens, which took the samples with it and left the estimate
+ * blank for a minute on the way back. At module scope they outlive any
+ * mounting, so navigating away and returning costs nothing.
+ */
+let burnSamples: Array<{ t: number; remaining: number }> = [];
+
+/**
+ * Requests per hour, measured over the last minute.
+ *
+ * Called once a second with the current reading. Returns null until a full
+ * window has been gathered.
+ *
+ * The allowance refills in one step on the hour, so a rise in `remaining` is
+ * the reset rather than negative spending. The samples are dropped at that
+ * point and the estimate starts afresh -- there is no honest way to average
+ * across a boundary where the meter went backwards.
+ */
+function trackBurnRate(remaining: number): number | null {
+  const now = Date.now();
+  const last = burnSamples[burnSamples.length - 1];
+
+  if (last && remaining > last.remaining) {
+    burnSamples = [];
+  }
+
+  burnSamples.push({ t: now, remaining });
+
+  // One sample from beyond the cutoff is kept, so the span stays a full
+  // minute instead of shrinking to whatever survived the trim.
+  while (burnSamples.length > 2 && burnSamples[1].t <= now - BURN_WINDOW_MS) {
+    burnSamples.shift();
+  }
+
+  const oldest = burnSamples[0];
+  const span = (now - oldest.t) / 1000;
+  if (span < BURN_MIN_SPAN_S) return null;
+
+  return Math.round(((oldest.remaining - remaining) / span) * 3600);
+}
+
 const DEFAULT_BUTTON_GROUPS: QuickMessageGroup[] = [RESCUE_DEFAULT, dispatchMessages];
 
 function loadButtonGroups(): QuickMessageGroup[] {
@@ -292,6 +359,7 @@ function HeaderMenu({
   onAlertSettingsChange: (next: AlertSettings) => void;
 }) {
   const [open, setOpen] = React.useState(false);
+  const dispatcher = useDispatcher();
   const ref = React.useRef<HTMLDivElement>(null);
   React.useEffect(() => {
     if (!open) return;
@@ -336,6 +404,20 @@ function HeaderMenu({
           </button>
           <div className="my-1 border-t border-slate-700/60" />
           <AlertSettingsMenu settings={alertSettings} onChange={onAlertSettingsChange} />
+          {/* Only rendered for a drilled dispatch, so the archive leaves no
+              trace in the menu for anyone who cannot open it. */}
+          {dispatcher === 'allowed' && (
+            <>
+              <div className="my-1 border-t border-slate-700/60" />
+              <button
+                onClick={() => { window.location.hash = '#search'; setOpen(false); }}
+                className="flex items-center gap-2 w-full text-left px-3 py-1.5 rounded text-xs text-slate-300 hover:bg-slate-700/50 transition-colors"
+              >
+                <Search className="w-3 h-3" />
+                Case search
+              </button>
+            </>
+          )}
           <div className="my-1 border-t border-slate-700/60" />
           <button
             onClick={() => { window.location.hash = '#deepl'; setOpen(false); }}
@@ -387,8 +469,12 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [unreadCases, setUnreadCases] = useState<Set<string>>(new Set());
   const [isLoadingApi, setIsLoadingApi] = useState(false);
-  const [, setRateLimitRemaining] = useState(0);
-  const [, setSecondsToReset] = useState(0);
+  const [rateLimitRemaining, setRateLimitRemaining] = useState(0);
+  const [secondsToReset, setSecondsToReset] = useState(0);
+  const [rateLimitTotal, setRateLimitTotal] = useState(RATE_LIMIT_TOTAL);
+  // Seeded from the samples that survived the last unmount, so returning from
+  // the case search shows a figure immediately rather than after a minute.
+  const [burnPerHour, setBurnPerHour] = useState<number | null>(null);
   const [alertSettings, setAlertSettings] = useState<AlertSettings>(loadAlertSettings);
   /** Cases already alerted for, so a re-render or refetch cannot ping twice. */
   const alertedRef = useRef<Set<string>>(new Set());
@@ -750,12 +836,16 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
     const updateRateLimit = () => {
       const info = fuelRatsApi.getRateLimitInfo();
       setRateLimitRemaining(info.remaining);
-      
+      // The API states its own allowance, so prefer it to the constant.
+      if (info.total > 0) setRateLimitTotal(info.total);
+
       if (info.resetDate) {
         const now = new Date();
         const seconds = Math.max(0, Math.floor((info.resetDate.getTime() - now.getTime()) / 1000));
         setSecondsToReset(seconds);
       }
+
+      setBurnPerHour(trackBurnRate(info.remaining));
     };
 
     updateRateLimit();
@@ -1451,6 +1541,58 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
                     <div className={`w-2 h-2 rounded-full ${ircStatus === 'connected' ? 'bg-green-400' : ircStatus === 'connecting' ? 'bg-yellow-400 animate-pulse' : ircStatus === 'error' ? 'bg-red-400' : 'bg-slate-500'}`} />
                     <span className={`text-xs ${ircStatus === 'connected' ? 'text-green-400' : ircStatus === 'connecting' ? 'text-yellow-400' : ircStatus === 'error' ? 'text-red-400' : 'text-slate-400'}`}>IRC</span>
                   </div>
+                  {/* Requests left this hour. The API reports it on every
+                      response and the board has tracked it all along; nothing
+                      rendered it, so the figure was being kept and thrown away
+                      once a second. Amber under a quarter left, red under a
+                      tenth -- the board's own polling is about 10% of the
+                      allowance, so anything near those is something else. */}
+                  {useApiData && rateLimitRemaining > 0 && (() => {
+                    const rate = burnPerHour;
+                    return (
+                      <div
+                        className="flex items-center gap-1.5"
+                        title={
+                          `${rateLimitRemaining.toLocaleString()} of ${rateLimitTotal.toLocaleString()} ` +
+                          `API requests left this hour` +
+                          (rate === null ? '' : `\nSpending ${rate.toLocaleString()}/hour over the last minute`)
+                        }
+                      >
+                        <span
+                          className={`text-xs ${
+                            rateLimitRemaining < rateLimitTotal * 0.1
+                              ? 'text-red-400'
+                              : rateLimitRemaining < rateLimitTotal * 0.25
+                                ? 'text-yellow-400'
+                                : 'text-slate-400'
+                          }`}
+                        >
+                          {rateLimitRemaining.toLocaleString()}
+                          <span className="text-slate-600"> left</span>
+                        </span>
+                        {secondsToReset > 0 && (
+                          <span className="text-xs text-slate-600">
+                            · {formatResetIn(secondsToReset)}
+                          </span>
+                        )}
+                        {rate !== null && (
+                          // Amber once the pace would spend three quarters of
+                          // the allowance, red once it would spend all of it.
+                          <span
+                            className={`text-xs ${
+                              rate >= rateLimitTotal
+                                ? 'text-red-400'
+                                : rate >= rateLimitTotal * 0.75
+                                  ? 'text-yellow-400'
+                                  : 'text-slate-600'
+                            }`}
+                          >
+                            · ~{rate.toLocaleString()}/hr
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
                 <span className="text-slate-500 text-xs">{isConnectionPanelOpen ? '▼︎' : '▶︎'}</span>
               </div>

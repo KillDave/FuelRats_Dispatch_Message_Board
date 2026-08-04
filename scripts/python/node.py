@@ -582,6 +582,17 @@ async def handle_client(websocket):
                         parsed = parse_irc_message(line)
                         if parsed:
                             await websocket.send(json.dumps(parsed))
+            except websockets.exceptions.ConnectionClosed:
+                # The browser went away: a tab closed, a refresh, or the dev
+                # server reloading the page. Close code 1001 is "going away"
+                # and ConnectionClosedOK means it was a clean one, so this is
+                # an ordinary end to the pump rather than a fault.
+                #
+                # Caught here as well as in ws_to_irc because the two ends fail
+                # in different places: this one raises out of websocket.send,
+                # which the old message blamed on reading from IRC -- the
+                # opposite end of the bridge from the one that actually closed.
+                print("WebSocket connection closed")
             except Exception as e:
                 print(f"ERR Error reading from IRC: {e}")
                 traceback.print_exc()
