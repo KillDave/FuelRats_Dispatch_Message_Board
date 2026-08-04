@@ -126,7 +126,7 @@ Click **Login** and you'll be redirected to [fuelrats.com](https://fuelrats.com)
 
 ## Changelog
 
-### Unreleased
+### v1.1.8
 - Case history and case search are open to every drilled rat. They were behind an additional **Drilled Dispatch** requirement, which has been removed. The board's own **Drilled Rat** requirement is unchanged
 - Removed the second group lookup and the `useDispatcher` hook along with it
 
