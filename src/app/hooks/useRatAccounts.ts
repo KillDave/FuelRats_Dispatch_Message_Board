@@ -59,28 +59,40 @@ function load(): RatAccount[] {
 export function useRatAccounts() {
   const [accounts, setAccounts] = useState<RatAccount[]>(load);
 
-  const save = (next: RatAccount[]) => {
-    setAccounts(next);
-    localStorage.setItem(KEY, JSON.stringify(next));
+  /**
+   * Functional update, not a plain assignment: several callers of this hook's
+   * mutators are long-lived closures (the journal poll timer especially) that
+   * were created against an old `accounts` value and never get recreated. If a
+   * mutator captured `accounts` directly, that closure would rebuild the whole
+   * list from its stale snapshot every time it fires, quietly reverting any
+   * change made since -- e.g. a ship update landing and then being erased by
+   * the next position tick. Deriving from React's own `prev` sidesteps that.
+   */
+  const save = (fn: (prev: RatAccount[]) => RatAccount[]) => {
+    setAccounts(prev => {
+      const next = fn(prev);
+      localStorage.setItem(KEY, JSON.stringify(next));
+      return next;
+    });
   };
 
   return {
     accounts,
     add:    (cmdr: string, system: string) =>
-      save([...accounts, { id: crypto.randomUUID(), cmdr, system }]),
+      save(prev => [...prev, { id: crypto.randomUUID(), cmdr, system }]),
     // cmdr/system and the ship are edited from different places, so updating one
     // must not clear the other.
     update: (id: string, cmdr: string, system: string) =>
-      save(accounts.map(a => (a.id === id ? { ...a, cmdr, system } : a))),
+      save(prev => prev.map(a => (a.id === id ? { ...a, cmdr, system } : a))),
     setShip: (id: string, slot: ShipSlot, ship: ShipParams | undefined) =>
-      save(accounts.map(a => {
+      save(prev => prev.map(a => {
         if (a.id !== id) return a;
         const ships = { ...a.ships, [slot]: ship };
         if (!ship) delete ships[slot];
         return { ...a, ships };
       })),
     setSupercharged: (id: string, on: boolean) =>
-      save(accounts.map(a => (a.id === id ? { ...a, startSupercharged: on } : a))),
+      save(prev => prev.map(a => (a.id === id ? { ...a, startSupercharged: on } : a))),
     /**
      * Add commanders found in the game journals.
      *
@@ -94,33 +106,37 @@ export function useRatAccounts() {
       positionAt?: string;
       ship?: ShipParams;
     }[]) => {
-      const have = new Set(accounts.map(a => a.cmdr.trim().toLowerCase()));
-      const additions = found
-        .filter(f => f.cmdr.trim() && !have.has(f.cmdr.trim().toLowerCase()))
-        .map(f => ({
-          id: crypto.randomUUID(),
-          cmdr: f.cmdr.trim(),
-          system: f.system ?? '',
-          positionAt: f.positionAt,
-          autoLocate: true,
-          ships: f.ship ? { short: f.ship } : undefined,
-        }));
-      if (additions.length) save([...accounts, ...additions]);
-      return additions.length;
+      let added = 0;
+      save(prev => {
+        const have = new Set(prev.map(a => a.cmdr.trim().toLowerCase()));
+        const additions = found
+          .filter(f => f.cmdr.trim() && !have.has(f.cmdr.trim().toLowerCase()))
+          .map(f => ({
+            id: crypto.randomUUID(),
+            cmdr: f.cmdr.trim(),
+            system: f.system ?? '',
+            positionAt: f.positionAt,
+            autoLocate: true,
+            ships: f.ship ? { short: f.ship } : undefined,
+          }));
+        added = additions.length;
+        return additions.length ? [...prev, ...additions] : prev;
+      });
+      return added;
     },
     setAutoLocate: (id: string, on: boolean) =>
-      save(accounts.map(a => (a.id === id ? { ...a, autoLocate: on } : a))),
+      save(prev => prev.map(a => (a.id === id ? { ...a, autoLocate: on } : a))),
     /**
      * Applied from EDSM. A no-op when the system is unchanged so a poll that
      * finds the rat where it left them does not churn state every minute.
      */
     setLocation: (id: string, system: string, positionAt?: string) =>
-      save(accounts.map(a =>
+      save(prev => prev.map(a =>
         a.id === id && (a.system !== system || a.positionAt !== positionAt)
           ? { ...a, system, positionAt }
           : a,
       )),
     remove: (id: string) =>
-      save(accounts.filter(a => a.id !== id)),
+      save(prev => prev.filter(a => a.id !== id)),
   };
 }

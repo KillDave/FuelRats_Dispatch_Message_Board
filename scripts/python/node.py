@@ -203,12 +203,16 @@ def _journal_dir():
 
 
 def _journal_position():
-    """Current commander and system, read from the newest journal.
+    """Current commander, system, and ship, read from the newest journal.
 
     Read backwards from the end: the events that carry a system are written as
     they happen, so the last one wins, and a long session's journal is not worth
     parsing in full to answer this. Only the newest file is consulted -- Elite
     starts a fresh one per session, so an older file cannot hold a newer position.
+
+    The Loadout event is included the same way _journal_commanders returns it --
+    verbatim, so the board can notice a swapped ship on the next poll instead of
+    only ever seeing the one that was live at the moment the account was imported.
     """
     d = _journal_dir()
     if not d:
@@ -221,7 +225,7 @@ def _journal_position():
         newest = max(logs, key=lambda f: os.path.getmtime(os.path.join(d, f)))
         path = os.path.join(d, newest)
 
-        system = timestamp = cmdr = None
+        system = timestamp = cmdr = loadout = None
         docked = None
         with open(path, 'r', encoding='utf-8', errors='replace') as fh:
             lines = fh.readlines()
@@ -243,7 +247,11 @@ def _journal_position():
                 docked = ev.get('Docked')
             if cmdr is None and kind in ('Commander', 'LoadGame'):
                 cmdr = ev.get('Name')
-            if system and cmdr:
+            # Reading backwards, the first Loadout hit is the newest -- a refit or
+            # ship swap since the session started, or just what was already fit.
+            if loadout is None and kind == 'Loadout':
+                loadout = ev
+            if system and cmdr and loadout:
                 break
 
         if not system:
@@ -254,6 +262,9 @@ def _journal_position():
             'timestamp': timestamp,
             'docked': docked,
             'journal': newest,
+            'loadout': loadout,
+            'ship': loadout.get('Ship') if loadout else None,
+            'shipName': loadout.get('ShipName') if loadout else None,
         }
     except Exception as e:
         return {'error': str(e)}

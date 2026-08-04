@@ -604,6 +604,12 @@ export function RatBoard({ cases, debriefMessages }: RatBoardProps) {
     .map(a => `${a.id}:${a.cmdr}`)
     .join('|');
 
+  // Ship type last seen per account, so a refit noticed on the first poll of the
+  // session is not mistaken for a swap -- only a change *from* a known ship
+  // triggers an update, which also protects hand-tuned cargo from being clobbered
+  // by every poll finding the same ship.
+  const lastSeenShipRef = useRef<Map<string, string>>(new Map());
+
   useEffect(() => {
     if (!journalEnabled || !trackedCmdrs) return;
     const controller = new AbortController();
@@ -611,7 +617,7 @@ export function RatBoard({ cases, debriefMessages }: RatBoardProps) {
     const tick = async () => {
       const res = await fetchJournalPosition(controller.signal);
       if (!res.ok) return; // bridge down, or the game has not written one yet
-      const { system, cmdr, timestamp } = res.position;
+      const { system, cmdr, timestamp, ship, loadout } = res.position;
 
       const targets = trackedCmdrs.split('|').map(entry => {
         const i = entry.indexOf(':');
@@ -625,7 +631,23 @@ export function RatBoard({ cases, debriefMessages }: RatBoardProps) {
         ? targets.filter(t => t.cmdr.trim().toLowerCase() === cmdr.trim().toLowerCase())
         : (targets.length === 1 ? targets : []);
 
-      for (const t of matches) setLocation(t.id, system, timestamp);
+      for (const t of matches) {
+        setLocation(t.id, system, timestamp);
+
+        if (!ship) continue;
+        const lastShip = lastSeenShipRef.current.get(t.id);
+        lastSeenShipRef.current.set(t.id, ship);
+        if (lastShip === undefined || lastShip === ship || !loadout) continue;
+
+        // Ship changed since we last looked at this account -- pull the fresh
+        // build off the new Loadout event, same parser the one-time import uses.
+        try {
+          const parsed = parseEdsyBuild(JSON.stringify(loadout));
+          if (verifyBuild(parsed).ok) setShip(t.id, 'short', parsed);
+        } catch {
+          /* unreadable loadout -- leave the previous ship in place */
+        }
+      }
     };
 
     void tick();

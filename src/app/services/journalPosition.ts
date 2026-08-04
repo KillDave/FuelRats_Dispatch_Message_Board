@@ -49,6 +49,11 @@ export interface JournalPosition {
   timestamp?: string;
   docked?: boolean | null;
   journal?: string;
+  /** Ship type of the newest Loadout event, e.g. "krait_mkii" -- for change detection. */
+  ship?: string;
+  shipName?: string;
+  /** The raw Loadout event, same shape as DetectedCommander.loadout. */
+  loadout?: unknown;
 }
 
 export type JournalResult =
