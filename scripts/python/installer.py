@@ -518,38 +518,6 @@ def finish_install(root: Path, version: str, desktop: bool) -> None:
         print("  could not add the Add/Remove Programs entry")
 
 
-def _self_delete(exe: Path | None, root: Path) -> bool:
-    """
-    Remove this executable and its folder once this process has exited.
-
-    A running image cannot delete itself, so the work is handed to a detached
-    cmd that waits a couple of seconds first. `ping` is the wait: `timeout`
-    needs a console and fails when there is not one to attach to, which is
-    exactly the case here.
-
-    DETACHED_PROCESS keeps it alive after this process ends; CREATE_NO_WINDOW
-    stops a console flashing up on the way out.
-    """
-    if exe is None:
-        return False
-    DETACHED_PROCESS = 0x00000008
-    CREATE_NO_WINDOW = 0x08000000
-    command = (
-        f'ping 127.0.0.1 -n 3 >nul & '
-        f'del /f /q "{exe}" >nul 2>&1 & '
-        f'rmdir "{root}" >nul 2>&1'
-    )
-    try:
-        subprocess.Popen(
-            ["cmd", "/c", command],
-            creationflags=DETACHED_PROCESS | CREATE_NO_WINDOW,
-            close_fds=True,
-        )
-        return True
-    except (OSError, subprocess.SubprocessError):
-        return False
-
-
 def cmd_uninstall(interactive_mode: bool = False) -> int:
     """Remove the app, its shortcuts and its registration."""
     root = existing_install()
@@ -592,15 +560,15 @@ def cmd_uninstall(interactive_mode: bool = False) -> int:
         root.rmdir()
         print("  files removed")
     except OSError:
-        # Hand the last two steps to a detached shell that outlives this
-        # process. Telling somebody to go and delete a file themselves is not
-        # an uninstall, and "it will go on the next reboot" is worse -- they
-        # will find it there tomorrow and wonder what failed.
-        if _self_delete(running, root):
-            print("  files removed")
-        else:
-            print(f"  files removed, except {running.name if running else 'the installer'}")
-            print(f"  delete {root} once this window closes")
+        # This executable stays. It cannot delete itself while running, and the
+        # workaround -- spawning a detached shell to do it afterwards -- is a
+        # shape antivirus recognises, which is not worth inviting on a binary
+        # that is already unsigned.
+        #
+        # Keeping it is useful anyway: reinstalling or updating later needs no
+        # fresh download.
+        print(f"  files removed; {SETUP_EXE} kept for reinstalling later")
+        print(f"  delete {root} yourself if you want it gone entirely")
 
     print("\n  The AdiIRC and HexChat scripts were left in place -- they are")
     print("  config for your IRC client, not part of this app.")
