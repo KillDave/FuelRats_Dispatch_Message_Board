@@ -71,36 +71,36 @@ files yourself or are running from a source checkout.
 
 A Perl script is provided at `scripts/IRC/hexchat/hexchat_tcp_server.pl` but is not yet fully supported. Drop it in `%APPDATA%\HexChat\addons\` — HexChat loads addons on startup, so there is nothing to register. It needs HexChat's Perl plugin, which its Windows installer offers as an optional component.
 
-### 2. Start the bridge exe
+### 2. Run FRBoard.exe
 
-Run `bridge.exe`. A console window will open and stay running in the background — keep it open while dispatching.
+Download **`FRBoard.exe`** from the release and run it. It serves the board *and*
+bridges IRC, so there is nothing else to start — it opens
+`http://localhost:5173` in your browser by default (`--no-browser` to stop that).
 
-To confirm the version: `bridge.exe --version`
+A console window stays open while it runs; keep it there while dispatching, as
+it prints the IRC connection state.
 
-The bridge also reads your Elite journals, which is how Rat Mode knows your
-commanders, ships, and current system. It finds them via the registry, since the
-Saved Games folder can be relocated — set `JOURNAL_DIR` to override. Keep the
-bridge up to date alongside the board: position tracking lives here, so an older
-`bridge.exe` leaves it silently doing nothing.
+It also reads your Elite journals, which is how Rat Mode knows your commanders,
+ships and current system. It finds them via the registry, since the Saved Games
+folder can be relocated — set `JOURNAL_DIR` to override.
 
-Optionally, you can register the `fr-dispatch://` protocol handler so the dispatch board can launch the bridge automatically on page load. This adds an entry to the Windows registry. If you'd rather just run the exe yourself each time, skip this step.
+Optionally register the `fr-dispatch://` protocol handler, so the board can
+start it for you on page load. This adds one entry to the Windows registry.
 
 ```
-bridge.exe --register
+FRBoard.exe --register
+FRBoard.exe --unregister
 ```
 
-To remove the registration later:
-```
-bridge.exe --unregister
-```
+> **Upgrading from 1.x:** `bridge.exe` no longer ships. `FRBoard.exe` replaces
+> both it and `Launch Dispatch Board.bat`, and needs no Python. Delete the old
+> folder once you are happy.
 
-### 3. Launch the dispatch board
+`Dispatch_Board_vX.Y.Z.zip` is still published for anyone who would rather serve
+`dist/` themselves — with the `.bat`, or any static web server. Note it contains
+only the board: pair it with `FRBoard.exe` if you want the IRC bridge as well.
 
-Double-click **`Launch Dispatch Board.bat`**.
-
-This starts a local web server and opens the board in your browser.
-
-### 4. Log in
+### 3. Log in
 
 Click **Login** and you'll be redirected to [fuelrats.com](https://fuelrats.com). Log in and approve the authorisation request — you'll be sent back to the dispatch board automatically.
 
