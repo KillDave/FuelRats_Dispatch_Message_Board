@@ -6,8 +6,10 @@ A browser-based dispatch tool for Fuel Rats dispatchers, connecting to the FuelR
 
 - A FuelRats account in the **Drilled Rat** group.
 - [AdiIRC](https://www.adiirc.com/) (or HexChat — see [IRC client setup](#irc-client-setup))
-- Python 3 (for the local web server)
-- `bridge.exe` (pre-built, included in the release)
+
+That is the whole list. From v2.0 the board and the bridge are a single
+`FRBoard.exe`, which carries its own web server, so Python is no longer needed
+to run it — only to build it.
 
 ### Building from source
 
@@ -26,6 +28,36 @@ checking on any build you intend to hand to someone else.
 
 ## Setup
 
+### The short way
+
+Download **`FRBoard-Setup.exe`** from the [latest release](https://github.com/techno314/FuelRats_Dispatch_Message_Board/releases/latest) and run it.
+
+It installs to `%LOCALAPPDATA%\Programs\FRBoard`, adds a Start Menu entry (so
+Windows Search finds it), places the bridge script into AdiIRC or HexChat for
+you, and registers in **Settings → Apps** so it uninstalls normally. No admin
+rights, because everything is per-user.
+
+Run it again any time to update — it replaces the board, the executable and the
+IRC script together, which is the combination people otherwise forget. AdiIRC
+notices the script changed and offers to reload it.
+
+The only thing it will not do while AdiIRC is open is register a script AdiIRC
+has never loaded before, since that needs a line adding to `config.ini` and
+AdiIRC rewrites that file when it closes. Updating an already-registered script
+is fine with it running.
+
+```
+FRBoard-Setup.exe              install or update, interactively
+FRBoard-Setup.exe --check      report versions, change nothing
+FRBoard-Setup.exe --update     files only, no registration
+FRBoard-Setup.exe --uninstall  remove it
+```
+
+### The manual way
+
+Everything below still works, and is what to read if you would rather place the
+files yourself or are running from a source checkout.
+
 ### 1. Set up the IRC bridge
 
 #### AdiIRC
@@ -37,7 +69,7 @@ checking on any build you intend to hand to someone else.
 
 #### HexChat *(work in progress)*
 
-A Python script is provided at `scripts/IRC/hexchat/hexchat_tcp_server_WIP.py` but is not yet fully supported.
+A Perl script is provided at `scripts/IRC/hexchat/hexchat_tcp_server.pl` but is not yet fully supported. Drop it in `%APPDATA%\HexChat\addons\` — HexChat loads addons on startup, so there is nothing to register. It needs HexChat's Perl plugin, which its Windows installer offers as an optional component.
 
 ### 2. Start the bridge exe
 
@@ -125,6 +157,12 @@ Click **Login** and you'll be redirected to [fuelrats.com](https://fuelrats.com)
 ---
 
 ## Changelog
+
+### v2.0.0
+- **One executable.** `FRBoard.exe` serves the board and bridges IRC in the same process, with `dist/` embedded inside it. Python is no longer needed to run the board, the `.bat` launcher is gone, and there is no longer a separate "is the board running or is the bridge running" to work out. It still serves on port `5173`, so the FuelRats sign-in redirect is unchanged
+- **An installer.** `FRBoard-Setup.exe` installs to `%LOCALAPPDATA%\Programs\FRBoard`, creates a Start Menu entry, places the bridge script into AdiIRC or HexChat, and registers in Settings → Apps. Per-user, so no admin prompt. Run it again to update, or `--uninstall` to remove it
+- The updater replaces the board, the executable **and** the IRC script together. Manually re-copying the `.mrc` after a release was the step most likely to be skipped, and skipping it is what left people on a broken bridge script
+- Release archives are written with correct forward-slash paths. `Compress-Archive` emits backslash separators, which the ZIP spec does not permit — Windows copes, but on Linux and macOS every entry became one file with a backslash in its name rather than a directory
 
 ### v1.1.81
 - A ship swap is noticed even if the board was closed when you made it. Detection compared against an in-memory record that emptied whenever `RatBoard` remounted, so a swap only registered if the board stayed open across it — reloading, opening the board afterwards, or toggling Rat/Dispatch mode all lost it. It now compares against the ship stored on the account, which survives all three

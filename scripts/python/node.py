@@ -6,6 +6,7 @@ import os
 import logging
 import urllib.request
 import urllib.error
+import webbrowser
 from datetime import datetime, timezone
 import traceback
 
@@ -358,6 +359,133 @@ CORS = (
     'Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n'
 )
 
+# ── The board itself ─────────────────────────────────────────────────────────
+#
+# Serving dist/ from here is what removes Python from the list of things a
+# dispatcher has to install. This process already runs an HTTP server and, as a
+# PyInstaller one-file build, already contains a Python interpreter -- so the
+# old arrangement shipped an interpreter and then asked the user to install a
+# second one just to run `python -m http.server`.
+#
+# 5173 on purpose, matching what the .bat used. The board builds its OAuth
+# redirect from window.location.origin, and that address is registered with
+# FuelRats, so keeping the port identical means sign-in keeps working with
+# nothing to re-register.
+
+BOARD_PORT = 5173
+
+MIME = {
+    '.html': 'text/html; charset=utf-8',
+    '.js':   'text/javascript; charset=utf-8',
+    '.css':  'text/css; charset=utf-8',
+    '.json': 'application/json',
+    '.svg':  'image/svg+xml',
+    '.png':  'image/png',
+    '.jpg':  'image/jpeg',
+    '.ico':  'image/x-icon',
+    '.mp3':  'audio/mpeg',
+    '.wav':  'audio/wav',
+    '.woff2': 'font/woff2',
+    '.map':  'application/json',
+}
+
+
+def _board_root():
+    """
+    Where dist/ lives.
+
+    Frozen, it is unpacked beside the bundle at runtime -- PyInstaller extracts
+    --add-data into a temporary folder it points sys._MEIPASS at. Running from
+    a source checkout, it is the dist/ the Vite build writes two levels up.
+    """
+    if getattr(sys, 'frozen', False):
+        return os.path.join(sys._MEIPASS, 'dist')
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'dist'))
+
+
+def _board_file(path):
+    """
+    Resolve a request path to a file inside dist/, or None.
+
+    Everything that is not a real file falls back to index.html, because the
+    board is a single-page app: /callback is handled in the browser, not here,
+    and returning 404 for it would break sign-in at the last step.
+
+    The realpath check is what stops "/../../.." reading outside dist/. It is
+    not theoretical -- this listens on a socket, and a request line is entirely
+    attacker-controlled.
+    """
+    root = _board_root()
+    clean = path.split('?', 1)[0].split('#', 1)[0]
+    if clean in ('', '/'):
+        clean = '/index.html'
+
+    candidate = os.path.realpath(os.path.join(root, clean.lstrip('/').replace('/', os.sep)))
+    if not candidate.startswith(os.path.realpath(root)):
+        return None
+    if os.path.isfile(candidate):
+        return candidate
+
+    index = os.path.join(root, 'index.html')
+    return index if os.path.isfile(index) else None
+
+
+async def handle_board_http(reader, writer):
+    """Static file server for the board. Loopback only, GET and HEAD only."""
+    try:
+        data = b''
+        while b'\r\n\r\n' not in data:
+            chunk = await reader.read(4096)
+            if not chunk:
+                return
+            data += chunk
+
+        request_line = data[:data.index(b'\r\n')].decode('utf-8', errors='replace')
+        parts = request_line.split(' ')
+        if len(parts) < 2:
+            return
+        method, path = parts[0], parts[1]
+
+        if method not in ('GET', 'HEAD'):
+            writer.write(b'HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 0\r\n\r\n')
+            await writer.drain()
+            return
+
+        target = _board_file(path)
+        if target is None:
+            body = b'Board files not found. Reinstall, or run npm run build.'
+            writer.write(
+                b'HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\n'
+                + f'Content-Length: {len(body)}\r\n\r\n'.encode() + body
+            )
+            await writer.drain()
+            return
+
+        with open(target, 'rb') as fh:
+            body = fh.read()
+
+        ctype = MIME.get(os.path.splitext(target)[1].lower(), 'application/octet-stream')
+        # index.html must not be cached: it names the hashed bundle, so a stale
+        # copy points at a file the next update has already deleted.
+        cache = ('no-store' if target.endswith('index.html')
+                 else 'public, max-age=31536000, immutable')
+        head = (
+            'HTTP/1.1 200 OK\r\n'
+            f'Content-Type: {ctype}\r\n'
+            f'Content-Length: {len(body)}\r\n'
+            f'Cache-Control: {cache}\r\n'
+            '\r\n'
+        ).encode()
+        writer.write(head if method == 'HEAD' else head + body)
+        await writer.drain()
+    except Exception as e:
+        print(f"[Board] HTTP error: {e}")
+    finally:
+        try:
+            writer.close()
+        except Exception:
+            pass
+
 async def handle_deepl_http(reader, writer):
     try:
         data = b''
@@ -686,6 +814,21 @@ async def main():
     try:
         proxy_server = await asyncio.start_server(handle_deepl_http, '127.0.0.1', PROXY_PORT)
         print(f"OK DeepL proxy listening on port {PROXY_PORT}")
+
+        # The board, if this build carries it. A source checkout without a
+        # dist/ still runs everything else, so developing against `npm run dev`
+        # is unaffected -- it just does not serve a copy of its own.
+        board_server = None
+        if os.path.isdir(_board_root()):
+            board_server = await asyncio.start_server(handle_board_http, '127.0.0.1', BOARD_PORT)
+            print(f"OK Board listening on http://localhost:{BOARD_PORT}")
+            if '--no-browser' not in sys.argv:
+                try:
+                    webbrowser.open(f'http://localhost:{BOARD_PORT}')
+                except Exception:
+                    pass
+        else:
+            print(f"-- No dist/ in this build; serve the board yourself")
 
         async with websockets.serve(
             handle_client,
