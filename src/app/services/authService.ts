@@ -51,7 +51,19 @@ const REDIRECT_URI = `${window.location.origin}/callback`;
 //
 // Adding a scope does not upgrade tokens already issued: anyone signed in
 // before this has to sign out and back in to get one that carries them.
-const SCOPES = 'openid profile rescues.read users.read.me groups.read.me';
+// groups.read, not groups.read.me -- there is no such scope, and asking for it
+// fails the whole authorisation with `invalid_scope`.
+//
+// The trap is that the `verified` group *holds* a permission called
+// groups.read.me, so it looks like a scope you may request. It is not: the API
+// declares the groups resource as ["read", "write"] only, with no .me variant,
+// and the authorize endpoint validates against that declaration.
+//
+// This was invisible for four releases. Scope is only checked when a token is
+// minted, and /profile returns meta.permissions whatever the token carries --
+// so every account that had signed in before the scope was added kept working,
+// and only a genuinely fresh login ever saw the error.
+const SCOPES = 'openid profile rescues.read users.read.me groups.read';
 
 export const authService = {
   // ── OAuth2 Implicit Grant ────────────────────────────────────────────────
