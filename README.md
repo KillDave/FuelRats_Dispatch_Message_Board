@@ -158,6 +158,11 @@ Click **Login** and you'll be redirected to [fuelrats.com](https://fuelrats.com)
 
 ## Changelog
 
+### v2.0.1
+- Fixed a fresh sign-in failing with `invalid_scope`. The board asked for `groups.read.me`, which is not a scope the API declares -- the groups resource has `read` and `write` only. It looked plausible because the `verified` group *holds* a permission by that name, but holding one and being able to request it are different things. Invisible for four releases, because scope is checked only when a token is minted and everyone signed in already had one
+- The installer offers to open the board when it finishes, and names it as it appears in the Start Menu
+- Running the bridge from a source checkout no longer serves the board on port 5173, which `npm run dev` uses. Only the packaged executable serves it, or `--serve` on request
+
 ### v2.0.0
 - **One executable.** `FRBoard.exe` serves the board and bridges IRC in the same process, with `dist/` embedded inside it. Python is no longer needed to run the board, the `.bat` launcher is gone, and there is no longer a separate "is the board running or is the bridge running" to work out. It still serves on port `5173`, so the FuelRats sign-in redirect is unchanged
 - **An installer.** `FRBoard-Setup.exe` installs to `%LOCALAPPDATA%\Programs\FRBoard`, creates a Start Menu entry, places the bridge script into AdiIRC or HexChat, and registers in Settings → Apps. Per-user, so no admin prompt. Run it again to update, or `--uninstall` to remove it

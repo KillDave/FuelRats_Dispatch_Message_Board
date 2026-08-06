@@ -692,6 +692,28 @@ def cmd_update(root: Path, do_install: bool) -> int:
     return 0
 
 
+def launch_board(exe: Path) -> bool:
+    """
+    Start the board and let it outlive this installer.
+
+    CREATE_NEW_CONSOLE on purpose, rather than inheriting this one: the board
+    prints its IRC connection state and that console is how it appears in the
+    taskbar, so it needs a window of its own that does not close when the
+    installer does.
+    """
+    CREATE_NEW_CONSOLE = 0x00000010
+    try:
+        subprocess.Popen(
+            [str(exe)],
+            cwd=str(exe.parent),
+            creationflags=CREATE_NEW_CONSOLE,
+            close_fds=True,
+        )
+        return True
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
 def how_to_start(root: Path) -> str:
     """
     Name whatever was actually installed, rather than what we hope was.
@@ -806,8 +828,20 @@ def interactive(root: Path) -> int:
     code = cmd_update(root, do_install=want_register)
     if code == 0:
         finish_install(root, installed_version(root) or tag, desktop)
-        print("\n  " + how_to_start(root))
-        print(f"  Installed to {root}")
+        print(f"\n  Installed to {root}")
+
+        board = root / BOARD_EXE
+        if board.is_file():
+            print()
+            if ask_yes(f"Open {APP_NAME} now?", default=True):
+                if launch_board(board):
+                    print("  Starting -- it will open in your browser shortly.")
+                else:
+                    print(f"  Could not start it; run {BOARD_EXE} yourself.")
+            else:
+                print(f"  Find it later in the Start Menu as \"{APP_NAME}\".")
+        else:
+            print("  " + how_to_start(root))
     pause()
     return code
 
