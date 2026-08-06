@@ -4,6 +4,7 @@ import json
 import sys
 import os
 import logging
+import subprocess
 import urllib.request
 import urllib.error
 import webbrowser
@@ -430,6 +431,50 @@ def _board_file(path):
     return index if os.path.isfile(index) else None
 
 
+def _run_updater():
+    """
+    Hand the update to FRBoard-Setup.exe and get out of its way.
+
+    Answered before any work happens, because the work kills this process: the
+    installer stops FRBoard.exe so the file can be replaced, then starts it
+    again. Waiting for a result would mean waiting to be killed.
+
+    Only offered from the packaged build. From a source checkout there is no
+    installer beside us and nothing sensible to replace -- `git pull` is the
+    update mechanism there.
+    """
+    if not getattr(sys, 'frozen', False):
+        body = json.dumps({'error': 'running from source; use git pull'}).encode()
+        return 400, 'application/json', body
+
+    setup = os.path.join(os.path.dirname(sys.executable), 'FRBoard-Setup.exe')
+    if not os.path.isfile(setup):
+        body = json.dumps({
+            'error': 'FRBoard-Setup.exe is not beside FRBoard.exe; reinstall to restore it',
+        }).encode()
+        return 404, 'application/json', body
+
+    try:
+        # Detached, or it dies with the process it is about to stop.
+        DETACHED_PROCESS = 0x00000008
+        CREATE_NO_WINDOW = 0x08000000
+        # --dir is explicit: without it the installer targets whatever the
+        # registry calls the install location, which is not necessarily where
+        # the copy being replaced is running from. Somebody running a second
+        # copy out of Downloads would otherwise update the installed one and
+        # be left wondering why the button changed nothing.
+        subprocess.Popen(
+            [setup, '--update', '--relaunch', '--dir', os.path.dirname(sys.executable)],
+            cwd=os.path.dirname(setup),
+            creationflags=DETACHED_PROCESS | CREATE_NO_WINDOW,
+            close_fds=True,
+        )
+    except Exception as e:
+        return 500, 'application/json', json.dumps({'error': str(e)}).encode()
+
+    return 200, 'application/json', json.dumps({'ok': True}).encode()
+
+
 async def handle_board_http(reader, writer):
     """Static file server for the board. Loopback only, GET and HEAD only."""
     try:
@@ -520,7 +565,9 @@ async def handle_deepl_http(reader, writer):
                 break
             body += chunk
 
-        if path.startswith('/journal/commanders'):
+        if path.startswith('/update') and method == 'POST':
+            status, content_type, resp_body = _run_updater()
+        elif path.startswith('/journal/commanders'):
             payload = json.dumps(_journal_commanders()).encode()
             status, content_type, resp_body = 200, 'application/json', payload
         elif path.startswith('/journal/position'):

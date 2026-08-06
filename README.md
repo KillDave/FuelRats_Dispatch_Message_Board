@@ -158,6 +158,11 @@ Click **Login** and you'll be redirected to [fuelrats.com](https://fuelrats.com)
 
 ## Changelog
 
+### v2.0.2
+- The board notices its own updates. When a newer release exists, a small chip appears beside the API and IRC indicators; clicking it downloads the update, replaces the board, the executable and the IRC script, and restarts the board. Nothing else is required of you
+- Nothing is shown while you are current, so the status row is unchanged on almost every load. It rechecks every 30 minutes, so a board left open for a shift still notices a release that lands during it
+- If the check cannot reach GitHub -- offline, rate-limited -- it stays silent rather than reporting a problem you did not have
+
 ### v2.0.1
 - Fixed a fresh sign-in failing with `invalid_scope`. The board asked for `groups.read.me`, which is not a scope the API declares -- the groups resource has `read` and `write` only. It looked plausible because the `verified` group *holds* a permission by that name, but holding one and being able to request it are different things. Invisible for four releases, because scope is checked only when a token is minted and everyone signed in already had one
 - The installer offers to open the board when it finishes, and names it as it appears in the Start Menu

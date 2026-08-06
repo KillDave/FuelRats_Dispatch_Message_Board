@@ -865,6 +865,8 @@ def main() -> int:
     ap.add_argument("--dir", type=Path, default=None,
                     help="install location (default: where it is already installed, "
                          "or %%LOCALAPPDATA%%\\Programs\\FRBoard)")
+    ap.add_argument("--relaunch", action="store_true",
+                    help="start the board again once the update is done")
     args = ap.parse_args()
 
     if args.uninstall:
@@ -881,7 +883,20 @@ def main() -> int:
     print(f"  install folder: {root}")
     if args.check:
         return cmd_check(root)
-    return cmd_update(root, do_install=args.install)
+
+    code = cmd_update(root, do_install=args.install)
+
+    # --relaunch exists for the button in the board. The update stops
+    # FRBoard.exe to replace it, which is the process that served the page the
+    # user clicked -- so unless it is started again they are left staring at a
+    # dead tab wondering what they broke.
+    if args.relaunch and code == 0:
+        board = root / BOARD_EXE
+        if board.is_file() and launch_board(board):
+            print("  board restarted")
+        else:
+            print(f"  could not restart the board; run {BOARD_EXE} yourself")
+    return code
 
 
 if __name__ == "__main__":

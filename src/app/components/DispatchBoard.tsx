@@ -3,6 +3,7 @@ import { CaseWindow } from './CaseWindow';
 import { RatBoard } from './RatBoard';
 import { MessageEditorPage } from './MessageEditorPage';
 import { CopyableSystem } from './CopyableSystem';
+import { UpdateBadge } from './UpdateBadge';
 import { Button } from '@/app/components/ui/button';
 import { Eye, EyeOff, Sidebar, User, MapPin, AlertTriangle, Clock, LogOut, Plus, Shield, ChevronDown, MessageSquare, Settings, Bell, Search } from 'lucide-react';
 import {
@@ -1533,6 +1534,9 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
                     <div className={`w-2 h-2 rounded-full ${ircStatus === 'connected' ? 'bg-green-400' : ircStatus === 'connecting' ? 'bg-yellow-400 animate-pulse' : ircStatus === 'error' ? 'bg-red-400' : 'bg-slate-500'}`} />
                     <span className={`text-xs ${ircStatus === 'connected' ? 'text-green-400' : ircStatus === 'connecting' ? 'text-yellow-400' : ircStatus === 'error' ? 'text-red-400' : 'text-slate-400'}`}>IRC</span>
                   </div>
+                  {/* Renders nothing unless a newer release exists, so this row
+                      is unchanged on almost every load. */}
+                  <UpdateBadge />
                   {/* Requests left this hour. The API reports it on every
                       response and the board has tracked it all along; nothing
                       rendered it, so the figure was being kept and thrown away
