@@ -30,7 +30,7 @@ checking on any build you intend to hand to someone else.
 
 ### The short way
 
-Download **`FRBoard-Setup.exe`** from the [latest release](https://github.com/techno314/FuelRats_Dispatch_Message_Board/releases/latest) and run it.
+Download **`FRBoard-Setup.exe`** from the [latest release](../../releases/latest) and run it.
 
 It installs to `%LOCALAPPDATA%\Programs\FRBoard`, adds a Start Menu entry (so
 Windows Search finds it), places the bridge script into AdiIRC or HexChat for

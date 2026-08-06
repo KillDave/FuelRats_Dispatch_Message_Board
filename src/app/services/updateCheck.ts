@@ -11,8 +11,11 @@
  * a month.
  */
 
-const RELEASES_API =
-  'https://api.github.com/repos/techno314/FuelRats_Dispatch_Message_Board/releases/latest';
+// Whichever repository this build was made from -- see scripts/repo.mjs. Not
+// hard-coded, because this project is a fork: a build made from some other
+// checkout must check that checkout's releases, or it would offer to replace
+// itself with somebody else's binaries.
+const RELEASES_API = `https://api.github.com/repos/${__REPO__}/releases/latest`;
 
 /**
  * How long an answer is reused, and how often the board asks again.

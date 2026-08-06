@@ -2,6 +2,10 @@
   "name": "@figma/my-make-file",
   "private": true,
   "version": "2.0.2",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/techno314/FuelRats_Dispatch_Message_Board.git"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite --open",
@@ -9,7 +13,7 @@
     "bridge": "python scripts/python/node.py",
     "bridge:build": "python -m PyInstaller --onefile --name bridge --exclude-module cryptography --distpath bridge-dist --workpath bridge-dist/build --specpath bridge-dist scripts/python/node.py",
     "board:build": "python -m PyInstaller --onefile --name FRBoard --exclude-module cryptography --add-data \"../dist;dist\" --distpath bridge-dist --workpath bridge-dist/build --specpath bridge-dist scripts/python/node.py",
-    "installer:build": "python -m PyInstaller --onefile --name FRBoard-Setup --distpath bridge-dist --workpath bridge-dist/build --specpath bridge-dist scripts/python/installer.py",
+    "installer:build": "node scripts/repo.mjs --emit && python -m PyInstaller --onefile --name FRBoard-Setup --distpath bridge-dist --workpath bridge-dist/build --specpath bridge-dist scripts/python/installer.py",
     "build:all": "npm run build && npm run bridge:build",
     "build:one": "npm run build && npm run board:build && npm run installer:build",
     "build:release": "powershell -ExecutionPolicy Bypass -File scripts/release.ps1"

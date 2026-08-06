@@ -33,7 +33,48 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
-REPO = "techno314/FuelRats_Dispatch_Message_Board"
+def _resolve_repo() -> str:
+    """
+    Whose releases does this build install?
+
+    Hard-coding an answer is wrong as soon as the code lives anywhere other
+    than where it was written -- this project is a fork, and a build made from
+    the upstream tree must not go and fetch the fork's binaries.
+
+    Frozen, the answer comes from _repo.py, which scripts/repo.mjs writes from
+    the origin remote just before PyInstaller runs; the static import below is
+    what gets it bundled. Run from source there is no generated file, so ask
+    git directly -- same question, same answer, no build step required to try
+    something out.
+    """
+    override = os.environ.get("FRBOARD_REPO")
+    if override:
+        return override
+
+    try:
+        from _repo import REPO as generated  # type: ignore[import-not-found]
+        return generated
+    except ImportError:
+        pass
+
+    try:
+        url = subprocess.run(
+            ["git", "config", "--get", "remote.origin.url"],
+            cwd=Path(__file__).resolve().parents[2],
+            capture_output=True, text=True, timeout=5,
+        ).stdout
+        found = re.search(r"github\.com[:/]+([^/]+)/(.+?)(?:\.git)?/?$", url.strip(), re.I)
+        if found:
+            return f"{found.group(1)}/{found.group(2)}"
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+    # Neither generated nor in a checkout. Point at the canonical project
+    # rather than at any one fork.
+    return "KillDave/FuelRats_Dispatch_Message_Board"
+
+
+REPO = _resolve_repo()
 API_LATEST = f"https://api.github.com/repos/{REPO}/releases/latest"
 
 # Frontier-style courtesy: identify the client. GitHub rejects requests with no
@@ -55,7 +96,7 @@ HEXCHAT_NAME = "hexchat_tcp_server.pl"
 
 APP_NAME = "FuelRats Dispatch Board"
 APP_KEY = "FRBoard"                       # registry key and folder name
-PUBLISHER = "techno314"
+PUBLISHER = REPO.split("/")[0]   # whoever's releases this build installs
 BOARD_EXE = "FRBoard.exe"
 SETUP_EXE = "FRBoard-Setup.exe"
 
@@ -586,6 +627,9 @@ def cmd_check(root: Path) -> int:
         return 1
 
     tag = rel.get("tag_name", "?")
+    # Worth stating outright: a build made from a fork installs that fork's
+    # releases, and there is otherwise no way to tell which one you have.
+    print(f"  releases  : {REPO}")
     print(f"  installed : {have or '(no version stamp - never installed by this tool)'}")
     print(f"  latest    : {tag}")
     if have and parse_version(have) >= parse_version(tag):
