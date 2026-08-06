@@ -8,20 +8,25 @@
 ; Installation:
 ; 1. Open AdiIRC
 ; 2. Press Alt+R (Script Editor)
-; 3. Click "New" and save as "tcp_server.mrc"
-; 4. Paste this code
-; 5. Save and restart AdiIRC
+; 3. Check the file list on the left first -- if an older copy of this script
+;    is already loaded, replace its contents rather than adding a second file.
+;    Two loaded copies both answer on *:START: and fight over the same socket.
+; 4. Otherwise click "New" and save as "tcp_server.mrc"
+; 5. Paste this code
+; 6. Save and restart AdiIRC
+;
+; Troubleshooting:
+;   "'ircbridge' socket in use"  ->  /bridge.restart
+;   Nothing connects             ->  /bridge.status
 ; ====================================================
 
 on *:START: {
-  ; Start TCP server on port 12346 (skip if already running)
-  if (!$sock(ircbridge).listening) {
-    socklisten ircbridge 12346
-    echo -s *** FuelRats IRC Bridge: TCP server started on port 12346
-  }
-  else {
-    echo -s *** FuelRats IRC Bridge: TCP server already running on port 12346
-  }
+  ; Defers to bridge.start rather than repeating it. The old copy here guarded
+  ; on .listening, which AdiIRC leaves empty, so the "already running" branch
+  ; never ran and the two implementations could drift. bridge.start closes
+  ; before it listens, so firing this twice -- which happens when two copies of
+  ; the script are loaded -- is harmless rather than an error.
+  bridge.start
 }
 
 on *:SOCKLISTEN:ircbridge: {
@@ -128,20 +133,38 @@ alias bridge.status {
   ; Check bridge status
   echo -a *** FuelRats IRC Bridge Status:
   
+  ; ircbridge* matches the listener as well as the accepted connections, and
+  ; the listener is not a bridge. Reporting it as "Socket: ircbridge -
+  ; Connected" made an idle client look like it had one attached, and made a
+  ; genuine connection hard to pick out from the noise.
+  ;
+  ; Accepted sockets are named ircbridgeNNNN by on SOCKLISTEN, so the listener
+  ; is exactly the one whose name has nothing after the prefix.
   var %i = 1
   var %found = 0
   while ($sock(ircbridge*,%i)) {
-    echo -a ***   Socket: $v1 - Connected
-    inc %found
+    if ($sock(ircbridge*,%i) != ircbridge) {
+      echo -a ***   Bridge connected: $sock(ircbridge*,%i)
+      inc %found
+    }
     inc %i
   }
-  
+
   if (%found == 0) {
     echo -a ***   No Python bridges connected
   }
-  
-  ; Check if listener is active
-  if ($sock(ircbridge).listening) {
+
+  ; Existence, not .listening.
+  ;
+  ; AdiIRC does not report .listening the way mIRC does -- it comes back empty
+  ; even for a listener that is up and has a client attached. Verified from
+  ; outside the client: AdiIRC holding 0.0.0.0:12346 with an ESTABLISHED
+  ; connection from the bridge, while this alias said NOT ACTIVE.
+  ;
+  ; That false negative was the whole problem. It told people to run
+  ; /bridge.start, which then failed with "'ircbridge' socket in use" because
+  ; the socket it claimed was missing had been there all along.
+  if ($sock(ircbridge)) {
     echo -a ***   Listener: Active on port 12346
   }
   else {
@@ -151,20 +174,52 @@ alias bridge.status {
 }
 
 alias bridge.start {
-  ; Start the TCP server
-  if ($sock(ircbridge).listening) {
-    echo -a *** TCP server already running
-  }
-  else {
-    socklisten ircbridge 12346
-    echo -a *** TCP server started on port 12346
-  }
+  ; Close then listen, unconditionally.
+  ;
+  ; No guard, because there is nothing dependable to guard on: AdiIRC returns
+  ; empty for .listening even when the socket is up, so the old "already
+  ; running" branch was unreachable and every start walked into socklisten
+  ; over a name that was still held -- "'ircbridge' socket in use".
+  ;
+  ; sockclose on a name that is not open is harmless, so this is safe to run
+  ; any number of times. Only the listener is closed; bridges already accepted
+  ; are named ircbridgeNNNN and keep their connections.
+  sockclose ircbridge
+  socklisten ircbridge 12346
+  echo -a *** TCP server listening on port 12346
 }
 
 alias bridge.stop {
   ; Stop the TCP server and disconnect all clients
   sockclose ircbridge*
   echo -a *** TCP server stopped and all bridges disconnected
+}
+
+alias bridge.debug {
+  ; Everything needed to diagnose a bridge that will not start, in one paste.
+  ;
+  ; Worth reading .listening here even though nothing branches on it any more:
+  ; seeing it blank next to a socket that plainly exists is what explains a
+  ; "NOT ACTIVE" listener that is in fact serving.
+  echo -a *** bridge.debug
+  echo -a ***   $!sock(ircbridge) = $sock(ircbridge)
+  echo -a ***   .name = $sock(ircbridge).name
+  echo -a ***   .listening = $sock(ircbridge).listening $+ $chr(32) $+ (blank is normal in AdiIRC)
+  echo -a *** --- sockets matching ircbridge* ---
+  var %i = 1
+  while ($sock(ircbridge*,%i)) {
+    echo -a ***   $calc(%i) name= $sock(ircbridge*,%i) listening= $sock(ircbridge*,%i).listening
+    inc %i
+  }
+  echo -a ***   total: $calc(%i - 1)
+  echo -a *** --- server connections ---
+  echo -a ***   $!scon(0) = $scon(0)
+  var %s = 1
+  while (%s <= $scon(0)) {
+    echo -a ***   network= $scon(%s).network status= $scon(%s).status channels= $scon(%s).chan(0)
+    inc %s
+  }
+  echo -a *** --- end ---
 }
 
 alias bridge.restart {

@@ -126,6 +126,13 @@ Click **Login** and you'll be redirected to [fuelrats.com](https://fuelrats.com)
 
 ## Changelog
 
+### Unreleased
+- A ship swap is noticed even if the board was closed when you made it. Detection compared against an in-memory record that emptied whenever `RatBoard` remounted, so a swap only registered if the board stayed open across it — reloading, opening the board afterwards, or toggling Rat/Dispatch mode all lost it. It now compares against the ship stored on the account, which survives all three
+- Fixed the AdiIRC bridge script reporting `Listener: NOT ACTIVE` while it was serving, and `/bridge.start` then failing with `'ircbridge' socket in use`. AdiIRC returns empty for `$sock().listening` — unlike mIRC — and all three guards trusted it, so the status was a false negative and the advice it gave caused the error. Status now tests whether the socket exists, and start closes the name before listening
+- `bridge.status` no longer lists the listener itself as a connected bridge, which made an idle client look like it had one attached
+- Added `/bridge.debug`, which dumps the socket and connection state in one paste
+- The README and launcher now say *why* Python is needed — a static server, because browsers refuse ES modules over `file://` and sign-in needs a real address to return to
+
 ### v1.1.8
 - Case history and case search are open to every drilled rat. They were behind an additional **Drilled Dispatch** requirement, which has been removed. The board's own **Drilled Rat** requirement is unchanged
 - Removed the second group lookup and the `useDispatcher` hook along with it

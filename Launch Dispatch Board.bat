@@ -10,7 +10,15 @@ if not exist "%DIST%\" (
 
 where python >nul 2>&1
 if %errorlevel% neq 0 (
-    echo ERROR: Python not found. Install Python 3 from https://python.org and add it to PATH.
+    echo ERROR: Python not found on PATH.
+    echo.
+    echo Python 3 is used only to serve this folder over HTTP. The board cannot
+    echo be opened straight from disk - browsers block ES modules on file:// and
+    echo the FuelRats sign-in needs a real address to return to.
+    echo.
+    echo Install Python 3 from https://python.org and tick "Add python.exe to PATH".
+    echo If typing python opens the Microsoft Store, that stub is not a real
+    echo install - use the python.org installer instead.
     pause
     exit /b 1
 )
