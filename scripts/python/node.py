@@ -815,11 +815,16 @@ async def main():
         proxy_server = await asyncio.start_server(handle_deepl_http, '127.0.0.1', PROXY_PORT)
         print(f"OK DeepL proxy listening on port {PROXY_PORT}")
 
-        # The board, if this build carries it. A source checkout without a
-        # dist/ still runs everything else, so developing against `npm run dev`
-        # is unaffected -- it just does not serve a copy of its own.
+        # The board, but only from the packaged build -- or on request.
+        #
+        # A source checkout is a development machine, where `npm run dev` owns
+        # port 5173. Serving dist/ here as well would have `npm run bridge`
+        # fight the dev server for it, and a stale dist/ from an earlier build
+        # is not what anyone editing the board wants to see anyway. The old
+        # workflow keeps working exactly as it did.
+        serve_board = getattr(sys, 'frozen', False) or '--serve' in sys.argv
         board_server = None
-        if os.path.isdir(_board_root()):
+        if serve_board and os.path.isdir(_board_root()):
             board_server = await asyncio.start_server(handle_board_http, '127.0.0.1', BOARD_PORT)
             print(f"OK Board listening on http://localhost:{BOARD_PORT}")
             if '--no-browser' not in sys.argv:
@@ -827,8 +832,10 @@ async def main():
                     webbrowser.open(f'http://localhost:{BOARD_PORT}')
                 except Exception:
                     pass
+        elif serve_board:
+            print("-- No dist/ in this build; serve the board yourself")
         else:
-            print(f"-- No dist/ in this build; serve the board yourself")
+            print("-- Source checkout: use npm run dev, or --serve to serve dist/")
 
         async with websockets.serve(
             handle_client,
