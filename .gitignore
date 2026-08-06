@@ -2,6 +2,9 @@
 node_modules/
 dist/
 
+# npm config — kept local; .npmrc is also where auth tokens land
+.npmrc
+
 # Environment variables (contains secrets like API keys)
 .env
 .env.local
