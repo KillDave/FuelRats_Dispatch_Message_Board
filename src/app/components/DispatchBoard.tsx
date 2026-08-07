@@ -1202,7 +1202,19 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
     const targetChannel = channel || ircChannel;
     // Commands like /tr are executed by AdiIRC directly, not wrapped in PRIVMSG
     if (text.startsWith('/')) {
-      ircWebSocket.sendRaw(text);
+      // /me is rewritten to name its channel.
+      //
+      // A raw /me acts on whichever window AdiIRC has focused, which is not
+      // necessarily the channel this case is in -- so an action typed into a
+      // case window could land in another channel, or in a private query, with
+      // nothing to say it had. /describe takes the target explicitly and is
+      // otherwise the same command.
+      //
+      // Only /me. Every other command is passed through untouched, because the
+      // rest are AdiIRC's or MechaSqueak's and the board has no business
+      // guessing what they act on.
+      const action = /^\/me\s+(.+)/is.exec(text);
+      ircWebSocket.sendRaw(action ? `/describe ${targetChannel} ${action[1]}` : text);
     } else {
       ircWebSocket.sendMessage(targetChannel, text);
 
