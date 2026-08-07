@@ -28,6 +28,10 @@ export function UpdateBadge() {
     // otherwise go unnoticed until the next restart -- which is exactly the
     // case this is meant to cover.
     //
+    // A reload also asks again, because the cached answer expires long before
+    // this timer does. It used not to, and "just refresh the page" was then
+    // advice that could not work.
+    //
     // Polling is not the same as interrupting: nothing moves, nothing pops up,
     // a chip simply appears next to the status dots and waits to be noticed.
     const tick = () =>

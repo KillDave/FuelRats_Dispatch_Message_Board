@@ -29,7 +29,23 @@ const RELEASES_API = `https://api.github.com/repos/${__REPO__}/releases/latest`;
  * one answer rather than each asking.
  */
 export const CHECK_INTERVAL_MS = 30 * 60 * 1000;
-const CACHE_MS = CHECK_INTERVAL_MS;
+
+/**
+ * How long an answer is reused.
+ *
+ * Deliberately far shorter than the interval above, and they were the same
+ * number until somebody published a release, reloaded the board, and was told
+ * nothing had changed. The cache had answered "you are current" a few minutes
+ * earlier and, being valid for the same half hour as the timer, went on saying
+ * so -- a reload could not get past it, which is exactly when somebody reaches
+ * for one.
+ *
+ * The cache is only there so that several tabs, or a burst of reloads, do not
+ * each ask GitHub. Two minutes does that, and leaves a reload meaning what
+ * people expect it to mean. Even reloading every two minutes for an hour costs
+ * thirty of the sixty requests GitHub allows.
+ */
+const CACHE_MS = 2 * 60 * 1000;
 const CACHE_KEY = 'fr_update_check';
 
 /** Where the bridge listens. Same default the rest of the board uses. */
