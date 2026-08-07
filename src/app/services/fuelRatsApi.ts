@@ -146,16 +146,39 @@ export class FuelRatsApiService {
    * someone reloaded the page. Events still drive the fast path; this only bounds
    * how long a miss can persist.
    *
-   * Matched to the polling fallback at 10s. It was 30s, which is long enough that
-   * watching for a change to land reads as "nothing happened until I reloaded".
-   * Socket events do arrive and are the fast path -- verified against the live API
-   * -- but this is the part that is guaranteed, so it has to be quick enough that
-   * a missed event is not mistaken for a broken board.
+   * Thirty seconds, not ten.
    *
-   * 360 requests/hour against a 3600/hour rate limit.
+   * It was ten on the reasoning that watching for a change to land and seeing
+   * nothing reads as a broken board. That over-weighted this channel. IRC is
+   * where a dispatcher actually learns things -- MechaSqueak announces the case
+   * there and that is the feed being read -- and the board is a second view of
+   * the same events. A missed socket event costing thirty seconds rather than
+   * ten is not the same kind of problem when the case has already been called
+   * out in channel.
+   *
+   * Socket events remain the fast path and land in about a second; this only
+   * bounds how long a *missed* one can persist. Tripling that bound costs
+   * little and saves two thirds of the requests.
+   *
+   * 120 requests/hour against a 3600/hour limit, and only while somebody is
+   * looking at the page. See scheduleReconcile.
    */
   private reconcileInterval: number | null = null;
-  private reconcileDelay: number = 10000;
+  private reconcileDelay: number = 30000;
+
+  /**
+   * The same loop, for a window nobody is looking at.
+   *
+   * Two minutes rather than thirty seconds. Nothing about correctness changes:
+   * the board still cannot stay wrong indefinitely, and coming back to the
+   * window reconciles at once rather than waiting this out. What changes is
+   * that a board left running for days stops spending anybody's allowance on a
+   * page that is minimised.
+   *
+   * 30 requests/hour while hidden.
+   */
+  private reconcileHiddenDelay: number = 120000;
+  private visibilityBound: boolean = false;
   
   // Callbacks
   private onUpdateCallback: ((cases: Case[]) => void) | null = null;
@@ -901,7 +924,50 @@ export class FuelRatsApiService {
 
   private startReconcile(): void {
     if (this.reconcileInterval || this.pollingInterval) return;
-    this.reconcileInterval = window.setInterval(() => this.reconcile(), this.reconcileDelay);
+    this.scheduleReconcile();
+    this.watchVisibility();
+  }
+
+  /**
+   * Reconcile on whichever cadence suits whether anybody is looking.
+   *
+   * The point of this loop is that a dropped rescueupdate cannot leave the
+   * board wrong for long. How long counts as "long" depends entirely on whether
+   * somebody is reading it: ten seconds matters to a dispatcher watching a case
+   * and means nothing to a window minimised since Tuesday. This board is
+   * routinely left running for days, and at ten seconds that is 360 requests an
+   * hour of somebody else's rate limit spent on a page nobody can see.
+   *
+   * So the guarantee is kept where it is worth something and relaxed where it
+   * is not.
+   */
+  private scheduleReconcile(): void {
+    if (this.reconcileInterval) {
+      clearInterval(this.reconcileInterval);
+    }
+    const delay = document.visibilityState === 'hidden'
+      ? this.reconcileHiddenDelay
+      : this.reconcileDelay;
+    this.reconcileInterval = window.setInterval(() => this.reconcile(), delay);
+  }
+
+  private watchVisibility(): void {
+    if (this.visibilityBound) return;
+    this.visibilityBound = true;
+
+    document.addEventListener('visibilitychange', () => {
+      // Only this loop is rescheduled. The REST fallback has its own cadence
+      // and its own reason to exist, and it only runs when the socket is down.
+      if (!this.reconcileInterval) return;
+
+      if (document.visibilityState === 'visible') {
+        // Catch up before resuming the fast cadence. Waiting for the next tick
+        // would show a stale board for up to a minute at exactly the moment
+        // somebody has come back to look at it.
+        void this.reconcile();
+      }
+      this.scheduleReconcile();
+    });
   }
 
   private stopReconcile(): void {
