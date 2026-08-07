@@ -5,7 +5,7 @@ import { MessageEditorPage } from './MessageEditorPage';
 import { CopyableSystem } from './CopyableSystem';
 import { UpdateBadge } from './UpdateBadge';
 import { Button } from '@/app/components/ui/button';
-import { Eye, EyeOff, Sidebar, User, MapPin, AlertTriangle, Clock, LogOut, Plus, Shield, ChevronDown, MessageSquare, Settings, Bell, Search } from 'lucide-react';
+import { Eye, EyeOff, Sidebar, User, MapPin, AlertTriangle, Clock, LogOut, Plus, Shield, ChevronDown, MessageSquare, Settings, Bell, Search, Palette } from 'lucide-react';
 import {
   ALERT_PLATFORMS, alertNewCase, desktopPermission, loadAlertSettings,
   requestDesktopPermission, saveAlertSettings, testAlert,
@@ -412,6 +412,13 @@ function HeaderMenu({
             Case search
           </button>
           <div className="my-1 border-t border-slate-700/60" />
+          <button
+            onClick={() => { window.location.hash = '#colors'; setOpen(false); }}
+            className="flex items-center gap-2 w-full text-left px-3 py-1.5 rounded text-xs text-slate-300 hover:bg-slate-700/50 transition-colors"
+          >
+            <Palette className="w-3 h-3" />
+            Message Bubble Colors
+          </button>
           <button
             onClick={() => { window.location.hash = '#deepl'; setOpen(false); }}
             className="flex items-center gap-2 w-full text-left px-3 py-1.5 rounded text-xs text-slate-300 hover:bg-slate-700/50 transition-colors"
@@ -1202,7 +1209,19 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
     const targetChannel = channel || ircChannel;
     // Commands like /tr are executed by AdiIRC directly, not wrapped in PRIVMSG
     if (text.startsWith('/')) {
-      ircWebSocket.sendRaw(text);
+      // /me is rewritten to name its channel.
+      //
+      // A raw /me acts on whichever window AdiIRC has focused, which is not
+      // necessarily the channel this case is in -- so an action typed into a
+      // case window could land in another channel, or in a private query, with
+      // nothing to say it had. /describe takes the target explicitly and is
+      // otherwise the same command.
+      //
+      // Only /me. Every other command is passed through untouched, because the
+      // rest are AdiIRC's or MechaSqueak's and the board has no business
+      // guessing what they act on.
+      const action = /^\/me\s+(.+)/is.exec(text);
+      ircWebSocket.sendRaw(action ? `/describe ${targetChannel} ${action[1]}` : text);
     } else {
       ircWebSocket.sendMessage(targetChannel, text);
 
