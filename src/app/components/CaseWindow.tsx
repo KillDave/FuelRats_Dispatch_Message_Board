@@ -7,7 +7,6 @@ import { ClientHistory } from './CaseHistory';
 import { distanceToSeconds, SCO_SHIPS, type ScoShipKey } from '../services/scTime';
 import { translateText, toDeepLTargetLang, getDeepLApiKey, setDeepLApiKey } from '../services/translationService';
 import { langblyTranslate, toLangblyTargetLang, getLangblyApiKey, setLangblyApiKey } from '../services/langblyService';
-import { getBubbleColors, classifyMessageRole } from '../services/colorSettingsService';
 import { Button } from '@/app/components/ui/button';
 import { Input } from '@/app/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/app/components/ui/popover';
@@ -120,7 +119,6 @@ export function CaseWindow({
   const [shipPopupOffset, setShipPopupOffset] = useState(0);
   const shipHideTimer = useRef<number | null>(null);
   const shipPopupRef = useRef<HTMLDivElement>(null);
-  const [bubbleColors] = useState(() => getBubbleColors());
 
   useLayoutEffect(() => {
     if (stationHover && stationPopupRef.current) {
@@ -999,9 +997,8 @@ export function CaseWindow({
                   className={`${
                     msg.isSystem
                       ? 'text-center text-xs text-slate-500 italic'
-                      : 'backdrop-blur-sm rounded p-2'
+                      : 'bg-slate-800/60 backdrop-blur-sm rounded p-2'
                   }`}
-                  style={msg.isSystem ? undefined : { backgroundColor: bubbleColors[classifyMessageRole(msg.sender, caseData)] }}
                 >
                   {!msg.isSystem && (
                     <>

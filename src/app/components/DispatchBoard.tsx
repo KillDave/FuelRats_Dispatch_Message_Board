@@ -5,7 +5,7 @@ import { MessageEditorPage } from './MessageEditorPage';
 import { CopyableSystem } from './CopyableSystem';
 import { UpdateBadge } from './UpdateBadge';
 import { Button } from '@/app/components/ui/button';
-import { Eye, EyeOff, Sidebar, User, MapPin, AlertTriangle, Clock, LogOut, Plus, Shield, ChevronDown, MessageSquare, Settings, Bell, Search, Palette } from 'lucide-react';
+import { Eye, EyeOff, Sidebar, User, MapPin, AlertTriangle, Clock, LogOut, Plus, Shield, ChevronDown, MessageSquare, Settings, Bell, Search } from 'lucide-react';
 import {
   ALERT_PLATFORMS, alertNewCase, desktopPermission, loadAlertSettings,
   requestDesktopPermission, saveAlertSettings, testAlert,
@@ -412,13 +412,6 @@ function HeaderMenu({
             Case search
           </button>
           <div className="my-1 border-t border-slate-700/60" />
-          <button
-            onClick={() => { window.location.hash = '#colors'; setOpen(false); }}
-            className="flex items-center gap-2 w-full text-left px-3 py-1.5 rounded text-xs text-slate-300 hover:bg-slate-700/50 transition-colors"
-          >
-            <Palette className="w-3 h-3" />
-            Message Bubble Colors
-          </button>
           <button
             onClick={() => { window.location.hash = '#deepl'; setOpen(false); }}
             className="flex items-center gap-2 w-full text-left px-3 py-1.5 rounded text-xs text-slate-300 hover:bg-slate-700/50 transition-colors"
