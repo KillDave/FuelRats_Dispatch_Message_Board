@@ -28,7 +28,7 @@ const RELEASES_API = `https://api.github.com/repos/${__REPO__}/releases/latest`;
  * The cache is what makes the timer cheap: several tabs, or a reload, share
  * one answer rather than each asking.
  */
-export const CHECK_INTERVAL_MS = 30 * 60 * 1000;
+export const CHECK_INTERVAL_MS = 10 * 60 * 1000;
 
 /**
  * How long an answer is reused.
