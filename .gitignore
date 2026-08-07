@@ -2,6 +2,9 @@
 node_modules/
 dist/
 
+# npm config — kept local; .npmrc is also where auth tokens land
+.npmrc
+
 # Environment variables (contains secrets like API keys)
 .env
 .env.local
@@ -22,6 +25,10 @@ Desktop.ini
 # Python
 __pycache__/
 *.pyc
+
+# Written at build time from the origin remote — committing it would bake one
+# fork's name into every other fork's build. See scripts/repo.mjs.
+scripts/python/_repo.py
 
 # Debug/test files
 /node.py

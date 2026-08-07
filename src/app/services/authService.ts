@@ -2,26 +2,8 @@ const TOKEN_KEY = 'fr_dispatch_token';
 const OAUTH_STATE_KEY = 'fr_oauth_state';
 
 
-/** The group behind "Drilled Dispatch" — displayName is the readable form. */
-const DISPATCH_GROUP = 'dispatch';
-
 /**
- * The same group, by id.
- *
- * Needed because `/profile` does not always return group *attributes*. With
- * some tokens the `groups` relationship resolves and `included` carries the
- * right number of entries, but each one arrives as a bare resource identifier
- * with no `name` on it -- so matching by name silently finds nothing and
- * denies everyone.
- *
- * The id is on the relationship itself, which is always present, so it works
- * either way. These are fixed: the FuelRats groups were created in 2017 and
- * the ids have not moved since.
- */
-const DISPATCH_GROUP_ID = 'aeb6e019-b818-48e4-84c0-439cb5cc6a3f';
-
-/**
- * "Drilled Rat" — the group the board as a whole requires.
+ * "Drilled Rat" — the group the board requires, and the only gate there is.
  *
  * Checked instead of the dispatch.read/dispatch.write permissions the gate
  * used to read. Those are granted by this very group (and by owner), so the
@@ -33,6 +15,20 @@ const DISPATCH_GROUP_ID = 'aeb6e019-b818-48e4-84c0-439cb5cc6a3f';
  * turning away Drilled Rats. The group is the thing actually meant.
  */
 const RAT_GROUP = 'rat';
+
+/**
+ * The same group, by id.
+ *
+ * Needed because `/profile` does not always return group *attributes*. With
+ * some tokens the `groups` relationship resolves and `included` carries the
+ * right number of entries, but each one arrives as a bare resource identifier
+ * with no `name` on it -- so matching by name silently finds nothing and
+ * denies everyone.
+ *
+ * The id is on the relationship itself, which is always present, so it works
+ * either way. It is fixed: the FuelRats groups were created in 2017 and the
+ * ids have not moved since.
+ */
 const RAT_GROUP_ID = '38f37675-d019-4288-abad-b117df4ac09c';
 
 export interface FuelRatsGroup {
@@ -45,16 +41,29 @@ export interface FuelRatsGroup {
 /** Cleared on sign-out so the next account is not judged on this one. */
 let groupsCache: Promise<FuelRatsGroup[]> | null = null;
 
+
 const CLIENT_ID = import.meta.env.VITE_CLIENT_ID as string;
 const REDIRECT_URI = `${window.location.origin}/callback`;
 // users.read.me and groups.read.me are what let /profile return the `groups`
-// relationship, which the dispatch gate reads. A token minted without them
+// relationship, which the Drilled Rat gate reads. A token minted without them
 // still answers /profile -- meta.permissions comes back regardless -- but the
 // included groups may not, and a gate that cannot see groups denies everyone.
 //
 // Adding a scope does not upgrade tokens already issued: anyone signed in
 // before this has to sign out and back in to get one that carries them.
-const SCOPES = 'openid profile rescues.read users.read.me groups.read.me';
+// groups.read, not groups.read.me -- there is no such scope, and asking for it
+// fails the whole authorisation with `invalid_scope`.
+//
+// The trap is that the `verified` group *holds* a permission called
+// groups.read.me, so it looks like a scope you may request. It is not: the API
+// declares the groups resource as ["read", "write"] only, with no .me variant,
+// and the authorize endpoint validates against that declaration.
+//
+// This was invisible for four releases. Scope is only checked when a token is
+// minted, and /profile returns meta.permissions whatever the token carries --
+// so every account that had signed in before the scope was added kept working,
+// and only a genuinely fresh login ever saw the error.
+const SCOPES = 'openid profile rescues.read users.read.me groups.read';
 
 export const authService = {
   // ── OAuth2 Implicit Grant ────────────────────────────────────────────────
@@ -122,7 +131,7 @@ export const authService = {
 
   clearToken(): void {
     localStorage.removeItem(TOKEN_KEY);
-    // Both gates read from this, so it has to go with the token.
+    // The gate reads from this, so it has to go with the token.
     groupsCache = null;
   },
 
@@ -145,18 +154,12 @@ export const authService = {
    * The groups this account belongs to.
    *
    * Read rather than inferred from permissions, because the two do not line
-   * up. Drilled Dispatch is the `dispatch` group, whose only permission is
-   * `twitter.write` -- which admin, moderator, netadmin, operations, overseer,
-   * owner and techrat all hold as well. Checking that permission would admit
-   * seven groups of people who are not dispatchers, so the group name is the
-   * only thing that answers the question.
-   *
-   * Conversely `dispatch.read`/`dispatch.write` are named after this board's
-   * job but come from the `rat` group, not `dispatch`.
+   * up: `dispatch.read`/`dispatch.write` are named after this board's job but
+   * come from the `rat` group, not `dispatch`. The group is the thing meant.
    */
   async getGroups(): Promise<FuelRatsGroup[]> {
-    // Shared between the two gates. Both run on load, and without this the
-    // board asked /profile twice for the same answer.
+    // Memoised so that a re-render, or a second caller, does not send the
+    // board back to /profile for an answer it already has.
     if (!groupsCache) {
       groupsCache = this.loadGroups().catch((e) => {
         groupsCache = null;   // a failure should not be remembered
@@ -186,7 +189,7 @@ export const authService = {
       // read groups, while an empty `included` means it was allowed and the
       // account simply has none.
       console.warn(
-        '[dispatcher gate] /profile returned no groups relationship — ' +
+        '[board gate] /profile returned no groups relationship — ' +
         'the token probably lacks groups.read.me. Sign out and back in.',
       );
       return [];
@@ -217,18 +220,12 @@ export const authService = {
       });
   },
 
-  /** Whether this account is a Drilled Dispatch. */
-  /** Whether this account is a Drilled Rat — what the board itself requires. */
+  /** Whether this account is a Drilled Rat — what the board requires. */
   async isDrilledRat(): Promise<boolean> {
-    const groups = await this.getGroups();
-    return groups.some((g) => g.id === RAT_GROUP_ID || g.name === RAT_GROUP);
-  },
-
-  async isDispatcher(): Promise<boolean> {
     const groups = await this.getGroups();
     // By id first, since the name is not always sent. The name check stays as
     // the readable one for when attributes did come through.
-    return groups.some((g) => g.id === DISPATCH_GROUP_ID || g.name === DISPATCH_GROUP);
+    return groups.some((g) => g.id === RAT_GROUP_ID || g.name === RAT_GROUP);
   },
 
   async getPermissions(): Promise<string[]> {

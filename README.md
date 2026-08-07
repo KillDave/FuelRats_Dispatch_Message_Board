@@ -5,10 +5,11 @@ A browser-based dispatch tool for Fuel Rats dispatchers, connecting to the FuelR
 ## Requirements
 
 - A FuelRats account in the **Drilled Rat** group.
-- Case history and search additionally require the **Drilled Dispatch** group.
 - [AdiIRC](https://www.adiirc.com/) (or HexChat — see [IRC client setup](#irc-client-setup))
-- Python 3 (for the local web server)
-- `bridge.exe` (pre-built, included in the release)
+
+That is the whole list. From v2.0 the board and the bridge are a single
+`FRBoard.exe`, which carries its own web server, so Python is no longer needed
+to run it — only to build it.
 
 ### Building from source
 
@@ -27,6 +28,36 @@ checking on any build you intend to hand to someone else.
 
 ## Setup
 
+### The short way
+
+Download **`FRBoard-Setup.exe`** from the [latest release](../../releases/latest) and run it.
+
+It installs to `%LOCALAPPDATA%\Programs\FRBoard`, adds a Start Menu entry (so
+Windows Search finds it), places the bridge script into AdiIRC or HexChat for
+you, and registers in **Settings → Apps** so it uninstalls normally. No admin
+rights, because everything is per-user.
+
+Run it again any time to update — it replaces the board, the executable and the
+IRC script together, which is the combination people otherwise forget. AdiIRC
+notices the script changed and offers to reload it.
+
+The only thing it will not do while AdiIRC is open is register a script AdiIRC
+has never loaded before, since that needs a line adding to `config.ini` and
+AdiIRC rewrites that file when it closes. Updating an already-registered script
+is fine with it running.
+
+```
+FRBoard-Setup.exe              install or update, interactively
+FRBoard-Setup.exe --check      report versions, change nothing
+FRBoard-Setup.exe --update     files only, no registration
+FRBoard-Setup.exe --uninstall  remove it
+```
+
+### The manual way
+
+Everything below still works, and is what to read if you would rather place the
+files yourself or are running from a source checkout.
+
 ### 1. Set up the IRC bridge
 
 #### AdiIRC
@@ -38,38 +69,38 @@ checking on any build you intend to hand to someone else.
 
 #### HexChat *(work in progress)*
 
-A Python script is provided at `scripts/IRC/hexchat/hexchat_tcp_server_WIP.py` but is not yet fully supported.
+A Perl script is provided at `scripts/IRC/hexchat/hexchat_tcp_server.pl` but is not yet fully supported. Drop it in `%APPDATA%\HexChat\addons\` — HexChat loads addons on startup, so there is nothing to register. It needs HexChat's Perl plugin, which its Windows installer offers as an optional component.
 
-### 2. Start the bridge exe
+### 2. Run FRBoard.exe
 
-Run `bridge.exe`. A console window will open and stay running in the background — keep it open while dispatching.
+Download **`FRBoard.exe`** from the release and run it. It serves the board *and*
+bridges IRC, so there is nothing else to start — it opens
+`http://localhost:5173` in your browser by default (`--no-browser` to stop that).
 
-To confirm the version: `bridge.exe --version`
+A console window stays open while it runs; keep it there while dispatching, as
+it prints the IRC connection state.
 
-The bridge also reads your Elite journals, which is how Rat Mode knows your
-commanders, ships, and current system. It finds them via the registry, since the
-Saved Games folder can be relocated — set `JOURNAL_DIR` to override. Keep the
-bridge up to date alongside the board: position tracking lives here, so an older
-`bridge.exe` leaves it silently doing nothing.
+It also reads your Elite journals, which is how Rat Mode knows your commanders,
+ships and current system. It finds them via the registry, since the Saved Games
+folder can be relocated — set `JOURNAL_DIR` to override.
 
-Optionally, you can register the `fr-dispatch://` protocol handler so the dispatch board can launch the bridge automatically on page load. This adds an entry to the Windows registry. If you'd rather just run the exe yourself each time, skip this step.
+Optionally register the `fr-dispatch://` protocol handler, so the board can
+start it for you on page load. This adds one entry to the Windows registry.
 
 ```
-bridge.exe --register
+FRBoard.exe --register
+FRBoard.exe --unregister
 ```
 
-To remove the registration later:
-```
-bridge.exe --unregister
-```
+> **Upgrading from 1.x:** `bridge.exe` no longer ships. `FRBoard.exe` replaces
+> both it and `Launch Dispatch Board.bat`, and needs no Python. Delete the old
+> folder once you are happy.
 
-### 3. Launch the dispatch board
+`Dispatch_Board_vX.Y.Z.zip` is still published for anyone who would rather serve
+`dist/` themselves — with the `.bat`, or any static web server. Note it contains
+only the board: pair it with `FRBoard.exe` if you want the IRC bridge as well.
 
-Double-click **`Launch Dispatch Board.bat`**.
-
-This starts a local web server and opens the board in your browser.
-
-### 4. Log in
+### 3. Log in
 
 Click **Login** and you'll be redirected to [fuelrats.com](https://fuelrats.com). Log in and approve the authorisation request — you'll be sent back to the dispatch board automatically.
 
@@ -83,16 +114,15 @@ Click **Login** and you'll be redirected to [fuelrats.com](https://fuelrats.com)
 - Per-case windows with platform, system, language, and landmark distance badges
 - Scoopable star status fetched from EDSM
 
-**Case history** *(Drilled Dispatch only)*
+**Case history**
 - Previous cases for the client, on each case window — matched on both `client`
   and `clientNick`, since the two disagree on roughly a quarter of rescues
 - Only closed rescues count as history; the case on screen never lists itself
 - Every row expands to the full API record, the case log, and a paperwork link
 - **Menu → Case search** searches the whole archive by client, system, rat,
   platform, status, outcome, date range or code red
-- Hidden entirely for anyone outside the group, rather than shown and refused.
-  A client is free text with no account behind it, so a name match is possible
-  history and is labelled as such
+- A client is free text with no account behind it, so a name match is possible
+  history rather than a confirmed identity, and is labelled as such
 
 **Rat Tracking**
 - Rat progress bar (FR / WR / BC / FUEL) with cascade logic
@@ -127,6 +157,33 @@ Click **Login** and you'll be redirected to [fuelrats.com](https://fuelrats.com)
 ---
 
 ## Changelog
+
+### v2.0.2
+- The board notices its own updates. When a newer release exists, a small chip appears beside the API and IRC indicators; clicking it downloads the update, replaces the board, the executable and the IRC script, and restarts the board. Nothing else is required of you
+- Nothing is shown while you are current, so the status row is unchanged on almost every load. It rechecks every 30 minutes, so a board left open for a shift still notices a release that lands during it
+- If the check cannot reach GitHub -- offline, rate-limited -- it stays silent rather than reporting a problem you did not have
+
+### v2.0.1
+- Fixed a fresh sign-in failing with `invalid_scope`. The board asked for `groups.read.me`, which is not a scope the API declares -- the groups resource has `read` and `write` only. It looked plausible because the `verified` group *holds* a permission by that name, but holding one and being able to request it are different things. Invisible for four releases, because scope is checked only when a token is minted and everyone signed in already had one
+- The installer offers to open the board when it finishes, and names it as it appears in the Start Menu
+- Running the bridge from a source checkout no longer serves the board on port 5173, which `npm run dev` uses. Only the packaged executable serves it, or `--serve` on request
+
+### v2.0.0
+- **One executable.** `FRBoard.exe` serves the board and bridges IRC in the same process, with `dist/` embedded inside it. Python is no longer needed to run the board, the `.bat` launcher is gone, and there is no longer a separate "is the board running or is the bridge running" to work out. It still serves on port `5173`, so the FuelRats sign-in redirect is unchanged
+- **An installer.** `FRBoard-Setup.exe` installs to `%LOCALAPPDATA%\Programs\FRBoard`, creates a Start Menu entry, places the bridge script into AdiIRC or HexChat, and registers in Settings → Apps. Per-user, so no admin prompt. Run it again to update, or `--uninstall` to remove it
+- The updater replaces the board, the executable **and** the IRC script together. Manually re-copying the `.mrc` after a release was the step most likely to be skipped, and skipping it is what left people on a broken bridge script
+- Release archives are written with correct forward-slash paths. `Compress-Archive` emits backslash separators, which the ZIP spec does not permit — Windows copes, but on Linux and macOS every entry became one file with a backslash in its name rather than a directory
+
+### v1.1.81
+- A ship swap is noticed even if the board was closed when you made it. Detection compared against an in-memory record that emptied whenever `RatBoard` remounted, so a swap only registered if the board stayed open across it — reloading, opening the board afterwards, or toggling Rat/Dispatch mode all lost it. It now compares against the ship stored on the account, which survives all three
+- Fixed the AdiIRC bridge script reporting `Listener: NOT ACTIVE` while it was serving, and `/bridge.start` then failing with `'ircbridge' socket in use`. AdiIRC returns empty for `$sock().listening` — unlike mIRC — and all three guards trusted it, so the status was a false negative and the advice it gave caused the error. Status now tests whether the socket exists, and start closes the name before listening
+- `bridge.status` no longer lists the listener itself as a connected bridge, which made an idle client look like it had one attached
+- Added `/bridge.debug`, which dumps the socket and connection state in one paste
+- The launcher now says *why* Python is needed when it cannot find it — a static server, because browsers refuse ES modules over `file://` and sign-in needs a real address to return to — and warns that the Microsoft Store `python` stub is not a working install
+
+### v1.1.8
+- Case history and case search are open to every drilled rat. They were behind an additional **Drilled Dispatch** requirement, which has been removed. The board's own **Drilled Rat** requirement is unchanged
+- Removed the second group lookup and the `useDispatcher` hook along with it
 
 ### v1.1.7
 - Case history on each case: previous rescues for the client, matched on both `client` and `clientNick`, with the full API record, the case log and a paperwork link behind a toggle. Limited to **Drilled Dispatch**, and hidden rather than refused for anyone else

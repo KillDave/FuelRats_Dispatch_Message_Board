@@ -3,8 +3,8 @@ import { CaseWindow } from './CaseWindow';
 import { RatBoard } from './RatBoard';
 import { MessageEditorPage } from './MessageEditorPage';
 import { CopyableSystem } from './CopyableSystem';
+import { UpdateBadge } from './UpdateBadge';
 import { Button } from '@/app/components/ui/button';
-import { useDispatcher } from '@/app/hooks/useDispatcher';
 import { Eye, EyeOff, Sidebar, User, MapPin, AlertTriangle, Clock, LogOut, Plus, Shield, ChevronDown, MessageSquare, Settings, Bell, Search } from 'lucide-react';
 import {
   ALERT_PLATFORMS, alertNewCase, desktopPermission, loadAlertSettings,
@@ -359,7 +359,6 @@ function HeaderMenu({
   onAlertSettingsChange: (next: AlertSettings) => void;
 }) {
   const [open, setOpen] = React.useState(false);
-  const dispatcher = useDispatcher();
   const ref = React.useRef<HTMLDivElement>(null);
   React.useEffect(() => {
     if (!open) return;
@@ -404,20 +403,14 @@ function HeaderMenu({
           </button>
           <div className="my-1 border-t border-slate-700/60" />
           <AlertSettingsMenu settings={alertSettings} onChange={onAlertSettingsChange} />
-          {/* Only rendered for a drilled dispatch, so the archive leaves no
-              trace in the menu for anyone who cannot open it. */}
-          {dispatcher === 'allowed' && (
-            <>
-              <div className="my-1 border-t border-slate-700/60" />
-              <button
-                onClick={() => { window.location.hash = '#search'; setOpen(false); }}
-                className="flex items-center gap-2 w-full text-left px-3 py-1.5 rounded text-xs text-slate-300 hover:bg-slate-700/50 transition-colors"
-              >
-                <Search className="w-3 h-3" />
-                Case search
-              </button>
-            </>
-          )}
+          <div className="my-1 border-t border-slate-700/60" />
+          <button
+            onClick={() => { window.location.hash = '#search'; setOpen(false); }}
+            className="flex items-center gap-2 w-full text-left px-3 py-1.5 rounded text-xs text-slate-300 hover:bg-slate-700/50 transition-colors"
+          >
+            <Search className="w-3 h-3" />
+            Case search
+          </button>
           <div className="my-1 border-t border-slate-700/60" />
           <button
             onClick={() => { window.location.hash = '#deepl'; setOpen(false); }}
@@ -1541,6 +1534,9 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
                     <div className={`w-2 h-2 rounded-full ${ircStatus === 'connected' ? 'bg-green-400' : ircStatus === 'connecting' ? 'bg-yellow-400 animate-pulse' : ircStatus === 'error' ? 'bg-red-400' : 'bg-slate-500'}`} />
                     <span className={`text-xs ${ircStatus === 'connected' ? 'text-green-400' : ircStatus === 'connecting' ? 'text-yellow-400' : ircStatus === 'error' ? 'text-red-400' : 'text-slate-400'}`}>IRC</span>
                   </div>
+                  {/* Renders nothing unless a newer release exists, so this row
+                      is unchanged on almost every load. */}
+                  <UpdateBadge />
                   {/* Requests left this hour. The API reports it on every
                       response and the board has tracked it all along; nothing
                       rendered it, so the figure was being kept and thrown away

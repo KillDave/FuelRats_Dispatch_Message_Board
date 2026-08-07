@@ -604,11 +604,17 @@ export function RatBoard({ cases, debriefMessages }: RatBoardProps) {
     .map(a => `${a.id}:${a.cmdr}`)
     .join('|');
 
-  // Ship type last seen per account, so a refit noticed on the first poll of the
-  // session is not mistaken for a swap -- only a change *from* a known ship
-  // triggers an update, which also protects hand-tuned cargo from being clobbered
-  // by every poll finding the same ship.
-  const lastSeenShipRef = useRef<Map<string, string>>(new Map());
+  /**
+   * The current accounts, readable inside the poll without re-running it.
+   *
+   * The poll has to know which ship is already stored against an account, but
+   * it cannot list `accounts` as a dependency: the position tick writes to
+   * `accounts` every five seconds, so that would tear down and rebuild the
+   * interval on every tick. Updating a ref during render and reading it when
+   * the timer fires keeps the effect stable and the data current.
+   */
+  const accountsRef = useRef(accounts);
+  accountsRef.current = accounts;
 
   useEffect(() => {
     if (!journalEnabled || !trackedCmdrs) return;
@@ -634,13 +640,32 @@ export function RatBoard({ cases, debriefMessages }: RatBoardProps) {
       for (const t of matches) {
         setLocation(t.id, system, timestamp);
 
-        if (!ship) continue;
-        const lastShip = lastSeenShipRef.current.get(t.id);
-        lastSeenShipRef.current.set(t.id, ship);
-        if (lastShip === undefined || lastShip === ship || !loadout) continue;
+        if (!ship || !loadout) continue;
 
-        // Ship changed since we last looked at this account -- pull the fresh
-        // build off the new Loadout event, same parser the one-time import uses.
+        // Compared against the ship already stored on the account, not against
+        // what this page has happened to see. An in-memory record only knows
+        // about swaps that occur while the board is mounted, so reloading the
+        // page, opening it after swapping, or toggling between Rat and Dispatch
+        // mode all reset it and the swap goes unnoticed -- which is most of the
+        // ways anyone actually uses this. What is stored survives all three.
+        //
+        // `sourceJson` is the Loadout the stored build was parsed from, so the
+        // ship type can be read back out of it without keeping a second copy.
+        const stored = accountsRef.current.find(a => a.id === t.id)?.ships?.short;
+        let storedShip: string | undefined;
+        if (stored?.sourceJson) {
+          try {
+            storedShip = (JSON.parse(stored.sourceJson) as { Ship?: string }).Ship;
+          } catch {
+            /* build stored from something other than a journal export */
+          }
+        }
+        // Same ship: leave it be, so a hand-tuned cargo figure is not undone by
+        // every poll re-importing the identical build.
+        if (storedShip && storedShip.toLowerCase() === ship.toLowerCase()) continue;
+
+        // Either a different ship, or nothing stored yet. Pull the build off
+        // the Loadout event with the same parser the one-time import uses.
         try {
           const parsed = parseEdsyBuild(JSON.stringify(loadout));
           if (verifyBuild(parsed).ok) setShip(t.id, 'short', parsed);

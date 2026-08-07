@@ -4,7 +4,6 @@ import { Button } from '@/app/components/ui/button';
 import { fuelRatsApi } from '@/app/services/fuelRatsApi';
 import type { RescueSearchCriteria, RescueSearchResult } from '@/app/services/fuelRatsApi';
 import { RescueList } from '@/app/components/CaseHistory';
-import { useDispatcher } from '@/app/hooks/useDispatcher';
 
 /**
  * Look a case up by hand.
@@ -34,9 +33,8 @@ export function CaseSearchPage({ onBack }: CaseSearchPageProps) {
   const [busy, setBusy] = useState(false);
   const [offset, setOffset] = useState(0);
   const [searched, setSearched] = useState(false);
-  const access = useDispatcher();
 
-  const set = (patch: Partial<RescueSearchCriteria>) => setForm({ ...form, ...patch });
+  const set =(patch: Partial<RescueSearchCriteria>) => setForm({ ...form, ...patch });
 
   const run = async (nextOffset: number) => {
     setBusy(true);
@@ -76,12 +74,6 @@ export function CaseSearchPage({ onBack }: CaseSearchPageProps) {
         <h1 className="text-lg font-semibold text-orange-500">Case search</h1>
       </header>
 
-      {access !== 'allowed' ? (
-        // Nothing rendered and nothing said. App only routes here for a
-        // dispatch, so this is the belt to that braces -- reaching it any
-        // other way should show no sign the page exists.
-        <div className="flex-1" />
-      ) : (
       <div className="flex-1 overflow-y-auto">
         <form onSubmit={onSubmit} className="p-4 border-b border-slate-800 bg-slate-900/40">
           <div className="grid gap-3 md:grid-cols-3">
@@ -170,7 +162,6 @@ export function CaseSearchPage({ onBack }: CaseSearchPageProps) {
           )}
         </div>
       </div>
-      )}
     </div>
   );
 }
