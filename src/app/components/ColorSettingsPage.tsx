@@ -9,10 +9,10 @@ import {
 
 const MOCK_CONVERSATION: Array<{ role: keyof BubbleColors; sender: string; text: string }> = [
   { role: 'client', sender: 'CMDR Example', text: "HELP! Im out of fuel send help!!!" },
-  { role: 'dispatcher', sender: 'Dispatch', text: 'Welcome to FuelRats Please turn your Modules Off' },
-  { role: 'rat', sender: 'RatExample[PC]', text: "## 5j" },
-  { role: 'client', sender: 'CMDR Example', text: 'I sent the Invite' },
-  { role: 'rat', sender: 'RatExample[PC]', text: "## fuel+" },
+  { role: 'dispatcher', sender: 'Dispatch', text: 'Welcome to FuelRats, disable modules except LS' },
+  { role: 'rat', sender: 'RatExample[PC]', text: "#5 5j" },
+  { role: 'client', sender: 'CMDR Example', text: 'I sent the Team Invite!' },
+  { role: 'rat', sender: 'RatExample[PC]', text: "#5 fuel+" },
 ];
 
 const ROLE_LABELS: Record<keyof BubbleColors, string> = {
