@@ -48,9 +48,26 @@ on *:SOCKREAD:ircbridge*: {
     ; Log the command
     echo -s *** Bridge → IRC: %data
     
-    ; To allow the Dispatch Board to send to IRC (including #debrief),
-    ; uncomment the line below:
-    ; %data
+    ; A plain PRIVMSG goes out through /msg rather than as a raw command.
+    ;
+    ; An unrecognised command is passed straight to the server, which is why
+    ; raw PRIVMSG reaches the channel -- but the server never echoes your own
+    ; PRIVMSG back to you. The client shows your messages because *it* renders
+    ; them when you use /msg or /say. Send raw and everyone sees it except you,
+    ; which reads as "sending is broken" while working perfectly for everybody
+    ; else.
+    ;
+    ; CTCP (/me arrives as PRIVMSG with a chr(1) wrapper) and every other command
+    ; still go through as raw, since /msg would send those as literal text.
+    if ($gettok(%data, 1, 32) == PRIVMSG) {
+      var %target = $gettok(%data, 2, 32)
+      var %body = $mid($gettok(%data, 3-, 32), 2)
+      if ($left(%body, 1) == $chr(1)) { %data }
+      else { msg %target %body }
+    }
+    else {
+      %data
+    }
   }
 }
 
