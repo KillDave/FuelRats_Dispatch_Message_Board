@@ -3,6 +3,7 @@ import { DispatchBoard } from '@/app/components/DispatchBoard';
 import { LoginScreen } from '@/app/components/LoginScreen';
 import { DeepLTestPage } from '@/app/components/DeepLTestPage';
 import { ColorSettingsPage } from '@/app/components/ColorSettingsPage';
+import { EdsmCasePage } from '@/app/components/EdsmCasePage';
 import { LangblyTestPage } from '@/app/components/LangblyTestPage';
 import { ClientTestPage } from '@/app/components/ClientTestPage';
 import { TrainingRequiredScreen } from '@/app/components/TrainingRequiredScreen';
@@ -66,6 +67,14 @@ export default function App() {
     authService.logout();
     setAuthenticated(false);
   };
+
+  if (hash.startsWith('#edsm')) {
+    return (
+      <div className="h-[100dvh] flex flex-col">
+        <EdsmCasePage />
+      </div>
+    );
+  }
 
   if (hash === '#colors') {
     return (

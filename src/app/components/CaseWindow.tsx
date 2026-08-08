@@ -11,6 +11,7 @@ import {
   getColorSettings,
   classifyMessageRole,
 } from '../services/colorSettingsService';
+import { openEdsmPopout } from '../services/edsmPopout';
 import { Button } from '@/app/components/ui/button';
 import { Input } from '@/app/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/app/components/ui/popover';
@@ -790,9 +791,13 @@ export function CaseWindow({
           </div>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
-          <span className="text-2xl font-bold text-orange-400">
+          <button
+            onClick={() => openEdsmPopout(caseData)}
+            className="text-2xl font-bold text-orange-400 hover:underline"
+            title="View EDSM system data in a new window"
+          >
             {caseData.id.split('-')[1]}
-          </span>
+          </button>
         </div>
       </div>
 
