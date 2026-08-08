@@ -158,6 +158,28 @@ Click **Login** and you'll be redirected to [fuelrats.com](https://fuelrats.com)
 
 ## Changelog
 
+### v2.0.7
+- Case numbers (in the case window and the sidebar list) now open EDSM system data -- scoopable status, closest fuel system, stations, stars, planets -- in its own browser window instead of an in-page modal, so it can stay open alongside the board instead of blocking it. The EDSM fetch logic moved into one shared `edsmService` instead of being duplicated a third time
+- Full Customization/Text Only (renamed from the bubble/nickname toggle) now also controls independent message-text and translation-text colors per role, on top of the bubble or nickname it already painted. Text Only shares one bubble color instead of a fixed neutral, matching how Full Customization behaves
+- Settings page reorganized into a 2x2 grid (By Role, Dispatcher, Client, Active Rats) with the preview pinned above a scrollable panel
+
+### v2.0.6
+- Message colours gain a choice of what the colour paints: the whole bubble, as before, or just the nickname. Bubble colours are dark for white text to sit on, so nickname mode keeps its own palette rather than sharing one -- a dispatcher's near-black bubble colour would have been invisible painted onto a nickname. Nickname mode starts at the orange every nickname already was, so switching it on changes nothing about your own messages until you do
+- Fixed the colours page scrolling off its own dark background past one screen, going white underneath everything past the fold
+- `board:build` now clears PyInstaller's cache before packing, since it was reusing what it collected last time -- a rebuilt board could ship under a fresh timestamp while still being the previous one. This one had already shipped
+- Update check now runs every 10 minutes instead of 30
+
+### v2.0.5
+- Sending from the board actually reaches IRC. The line executing what the bridge sends was commented out -- deliberate, so a freshly wired board could not send until enabled, but it meant "nothing happens" was the out-of-the-box experience with no visible cause. Uncommenting it revealed a second issue: a raw `PRIVMSG` reaches everyone except the sender, since a server never echoes your own messages back to you. Messages now go out via `/msg`, which AdiIRC renders locally; actions (`/me`) still go raw, since wrapping them in `/msg` would send the CTCP envelope as literal text
+- `/me` now targets the channel the case window is actually addressing, rewritten into `/describe #channel`, instead of acting on whichever window AdiIRC happened to have focused
+- Added per-role message bubble color settings (Dispatcher, Client, Active Rat), with a live mock-conversation preview
+
+### v2.0.4
+- Reconciliation polling cut from 360 requests/hour per open board to 120 while visible and 30 while hidden, plus an immediate reconcile on regaining focus -- WebSocket events remain the primary path; this timer only bounds how stale a dropped event can leave a case, and ten seconds was over-weighting that against the FuelRats API's 3,600/hour allowance
+
+### v2.0.3
+- Fixed a reload not actually re-checking for updates: the cached answer was valid for the same half hour as the timer that refreshes it, so a reload right after a release went out kept reporting the old version. Cache window cut to two minutes; the half-hourly background check is unchanged
+
 ### v2.0.2
 - The board notices its own updates. When a newer release exists, a small chip appears beside the API and IRC indicators; clicking it downloads the update, replaces the board, the executable and the IRC script, and restarts the board. Nothing else is required of you
 - Nothing is shown while you are current, so the status row is unchanged on almost every load. It rechecks every 30 minutes, so a board left open for a shift still notices a release that lands during it
