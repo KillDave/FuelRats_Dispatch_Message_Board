@@ -18,15 +18,14 @@
 const RELEASES_API = `https://api.github.com/repos/${__REPO__}/releases/latest`;
 
 /**
- * How long an answer is reused, and how often the board asks again.
+ * How often the board asks again.
  *
- * Half an hour. A board left open for a whole shift should notice a release
- * that lands during it -- that is the entire point of the badge -- and a
- * check every thirty minutes costs two requests an hour against GitHub's
- * allowance of sixty.
+ * Ten minutes. A board left open for a whole shift should notice a release
+ * that lands during it -- that is the entire point of the badge -- and six
+ * requests an hour is a tenth of GitHub's allowance of sixty.
  *
- * The cache is what makes the timer cheap: several tabs, or a reload, share
- * one answer rather than each asking.
+ * The cache below is what makes a timer this frequent cheap: several tabs, or
+ * a reload, share one answer rather than each asking.
  */
 export const CHECK_INTERVAL_MS = 10 * 60 * 1000;
 

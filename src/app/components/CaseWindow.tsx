@@ -7,7 +7,11 @@ import { ClientHistory } from './CaseHistory';
 import { distanceToSeconds, SCO_SHIPS, type ScoShipKey } from '../services/scTime';
 import { translateText, toDeepLTargetLang, getDeepLApiKey, setDeepLApiKey } from '../services/translationService';
 import { langblyTranslate, toLangblyTargetLang, getLangblyApiKey, setLangblyApiKey } from '../services/langblyService';
-import { getBubbleColors, classifyMessageRole } from '../services/colorSettingsService';
+import {
+  getColorSettings,
+  classifyMessageRole,
+  NEUTRAL_BUBBLE,
+} from '../services/colorSettingsService';
 import { Button } from '@/app/components/ui/button';
 import { Input } from '@/app/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/app/components/ui/popover';
@@ -120,7 +124,8 @@ export function CaseWindow({
   const [shipPopupOffset, setShipPopupOffset] = useState(0);
   const shipHideTimer = useRef<number | null>(null);
   const shipPopupRef = useRef<HTMLDivElement>(null);
-  const [bubbleColors] = useState(() => getBubbleColors());
+  const [colorSettings] = useState(() => getColorSettings());
+  const nickMode = colorSettings.target === 'nick';
 
   useLayoutEffect(() => {
     if (stationHover && stationPopupRef.current) {
@@ -993,7 +998,12 @@ export function CaseWindow({
             onClick={handleChatAreaClick}
           >
             <div className="space-y-3">
-              {caseData.messages.map((msg) => (
+              {caseData.messages.map((msg) => {
+                // Worked out once per message: in nick mode it colours the
+                // name, in bubble mode the background, and it is the same
+                // answer either way.
+                const role = msg.isSystem ? null : classifyMessageRole(msg.sender, caseData);
+                return (
                 <div
                   key={msg.id}
                   className={`${
@@ -1001,13 +1011,28 @@ export function CaseWindow({
                       ? 'text-center text-xs text-slate-500 italic'
                       : 'backdrop-blur-sm rounded p-2'
                   }`}
-                  style={msg.isSystem ? undefined : { backgroundColor: bubbleColors[classifyMessageRole(msg.sender, caseData)] }}
+                  style={
+                    role === null
+                      ? undefined
+                      : {
+                          backgroundColor: nickMode
+                            ? NEUTRAL_BUBBLE
+                            : colorSettings.bubble[role],
+                        }
+                  }
                 >
                   {!msg.isSystem && (
                     <>
                       <div className="flex items-center justify-between mb-1">
                         <div className="flex items-center gap-2">
-                          <span className="text-xs font-semibold text-orange-400">
+                          <span
+                            className={`text-xs font-semibold ${nickMode ? '' : 'text-orange-400'}`}
+                            style={
+                              nickMode && role !== null
+                                ? { color: colorSettings.nick[role] }
+                                : undefined
+                            }
+                          >
                             {msg.sender}
                           </span>
                         </div>
@@ -1027,7 +1052,8 @@ export function CaseWindow({
                     </span>
                   )}
                 </div>
-              ))}
+                );
+              })}
               <div ref={messagesEndRef} />
             </div>
           </div>

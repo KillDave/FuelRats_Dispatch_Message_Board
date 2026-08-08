@@ -6,3 +6,18 @@ html, body, #root {
   height: 100%;
   margin: 0;
 }
+
+/*
+ * The canvas behind everything.
+ *
+ * theme.css sets `body { @apply bg-background }`, and --background is white --
+ * a shadcn default that nothing in this dark app ever wanted to see. It only
+ * shows when a page's own background stops short of the scroll height, which
+ * is a layout bug every time it happens, but the symptom is a full white screen
+ * rather than anything that points at the cause.
+ *
+ * Unlayered, so it beats the @layer base rule regardless of import order.
+ */
+html, body {
+  background-color: #020617; /* slate-950, what every page paints anyway */
+}

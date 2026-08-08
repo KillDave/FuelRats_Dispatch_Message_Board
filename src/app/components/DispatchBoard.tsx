@@ -417,7 +417,7 @@ function HeaderMenu({
             className="flex items-center gap-2 w-full text-left px-3 py-1.5 rounded text-xs text-slate-300 hover:bg-slate-700/50 transition-colors"
           >
             <Palette className="w-3 h-3" />
-            Message Bubble Colors
+            Message Colors
           </button>
           <button
             onClick={() => { window.location.hash = '#deepl'; setOpen(false); }}
