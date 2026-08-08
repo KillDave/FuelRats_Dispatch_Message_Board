@@ -4,7 +4,7 @@
   "version": "2.0.6",
   "repository": {
     "type": "git",
-    "url": "https://github.com/techno314/FuelRats_Dispatch_Message_Board.git"
+    "url": "https://github.com/KillDave/FuelRats_Dispatch_Message_Board.git"
   },
   "type": "module",
   "scripts": {
