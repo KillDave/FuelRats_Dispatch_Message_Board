@@ -82,7 +82,7 @@ export function UpdateBadge() {
           ? `Update failed: ${error}\nDownload it yourself from ${update.url}`
           : `${update.latest} is available -- click to install it and restart the board`
       }
-      className={`flex items-center gap-1.5 rounded px-1.5 py-0.5 transition-colors ${
+      className={`flex items-center gap-1.5 rounded px-1.5 py-0.5 -my-0.5 text-xs leading-none transition-colors ${
         state === 'failed'
           ? 'text-red-400 hover:bg-red-500/10'
           : 'text-amber-300 hover:bg-amber-500/10'
