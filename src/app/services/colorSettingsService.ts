@@ -23,6 +23,15 @@ export interface ColorSettings {
   target: ColorTarget;
   bubble: BubbleColors;
   nick: BubbleColors;
+  // Message body and translation-line colours are independent of `target`:
+  // they read the message itself rather than identify who sent it, so they
+  // stay on regardless of whether the bubble or the nickname is doing the
+  // identifying.
+  text: BubbleColors;
+  translation: BubbleColors;
+  // The one shared bubble colour used in Text Only mode, where role is read
+  // off the nickname instead and every bubble is otherwise the same.
+  neutralBubble: string;
 }
 
 export const DEFAULT_BUBBLE_COLORS: BubbleColors = {
@@ -50,6 +59,18 @@ export const DEFAULT_NICK_COLORS: BubbleColors = {
   rat: '#7dd3fc', // sky-300
 };
 
+export const DEFAULT_TEXT_COLORS: BubbleColors = {
+  dispatcher: '#e2e8f0', // slate-200, the original message-text colour
+  client: '#e2e8f0',
+  rat: '#e2e8f0',
+};
+
+export const DEFAULT_TRANSLATION_COLORS: BubbleColors = {
+  dispatcher: '#67e8f9', // cyan-300, the original translation-text colour
+  client: '#67e8f9',
+  rat: '#67e8f9',
+};
+
 /** The bubble everything sits on when the colour has gone to the nickname. */
 export const NEUTRAL_BUBBLE = DEFAULT_BUBBLE_COLORS.dispatcher;
 
@@ -57,6 +78,9 @@ export const DEFAULT_COLOR_SETTINGS: ColorSettings = {
   target: 'bubble',
   bubble: DEFAULT_BUBBLE_COLORS,
   nick: DEFAULT_NICK_COLORS,
+  text: DEFAULT_TEXT_COLORS,
+  translation: DEFAULT_TRANSLATION_COLORS,
+  neutralBubble: NEUTRAL_BUBBLE,
 };
 
 function readPalette(source: unknown, fallback: BubbleColors): BubbleColors {
@@ -80,6 +104,9 @@ export function getColorSettings(): ColorSettings {
       // moving it would silently reset everybody's saved colours.
       bubble: readPalette(parsed, DEFAULT_BUBBLE_COLORS),
       nick: readPalette(parsed.nick, DEFAULT_NICK_COLORS),
+      text: readPalette(parsed.text, DEFAULT_TEXT_COLORS),
+      translation: readPalette(parsed.translation, DEFAULT_TRANSLATION_COLORS),
+      neutralBubble: parsed.neutralBubble || NEUTRAL_BUBBLE,
     };
   } catch {
     return structuredClone(DEFAULT_COLOR_SETTINGS);
@@ -89,7 +116,14 @@ export function getColorSettings(): ColorSettings {
 export function setColorSettings(settings: ColorSettings): void {
   localStorage.setItem(
     BUBBLE_COLORS_STORAGE,
-    JSON.stringify({ ...settings.bubble, target: settings.target, nick: settings.nick })
+    JSON.stringify({
+      ...settings.bubble,
+      target: settings.target,
+      nick: settings.nick,
+      text: settings.text,
+      translation: settings.translation,
+      neutralBubble: settings.neutralBubble,
+    })
   );
 }
 

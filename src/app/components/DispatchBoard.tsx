@@ -14,6 +14,7 @@ import {
 import { fuelRatsApi, apiDebug } from '../services/fuelRatsApi';
 import { ircWebSocket, IRCMessage, IRCConnectionStatus } from '../services/ircWebSocket';
 import { IRCConnectionPanel } from './IRCConnectionPanel';
+import { openEdsmPopout } from '../services/edsmPopout';
 import fuelRatsLogo from './image/TransparentBackgroundRatto.png';
 import disconnectIcon from './image/Disconnect_Icon.png';
 import { dispatchMessages, rescueMessages } from '../config/quickMessages';
@@ -1513,9 +1514,16 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
                       </div>
                       <div className="flex-shrink-0 flex flex-col items-end gap-0.5">
                         <div className="flex items-center gap-2">
-                          <span className="text-2xl font-bold text-orange-400">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openEdsmPopout(caseData);
+                            }}
+                            className="text-2xl font-bold text-orange-400 hover:underline"
+                            title="View EDSM system data in a new window"
+                          >
                             {caseData.id.split('-')[1]}
-                          </span>
+                          </button>
                           {isVisible ? (
                             <Eye className="w-4 h-4 text-orange-500" />
                           ) : hasUnread ? (

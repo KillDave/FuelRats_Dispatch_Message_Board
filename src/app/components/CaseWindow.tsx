@@ -10,8 +10,8 @@ import { langblyTranslate, toLangblyTargetLang, getLangblyApiKey, setLangblyApiK
 import {
   getColorSettings,
   classifyMessageRole,
-  NEUTRAL_BUBBLE,
 } from '../services/colorSettingsService';
+import { openEdsmPopout } from '../services/edsmPopout';
 import { Button } from '@/app/components/ui/button';
 import { Input } from '@/app/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/app/components/ui/popover';
@@ -791,9 +791,13 @@ export function CaseWindow({
           </div>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
-          <span className="text-2xl font-bold text-orange-400">
+          <button
+            onClick={() => openEdsmPopout(caseData)}
+            className="text-2xl font-bold text-orange-400 hover:underline"
+            title="View EDSM system data in a new window"
+          >
             {caseData.id.split('-')[1]}
-          </span>
+          </button>
         </div>
       </div>
 
@@ -1016,7 +1020,7 @@ export function CaseWindow({
                       ? undefined
                       : {
                           backgroundColor: nickMode
-                            ? NEUTRAL_BUBBLE
+                            ? colorSettings.neutralBubble
                             : colorSettings.bubble[role],
                         }
                   }
@@ -1040,9 +1044,14 @@ export function CaseWindow({
                           {formatTime(msg.timestamp)}
                         </span>
                       </div>
-                      <p className={`text-sm break-words ${msg.isNotice ? 'text-cyan-300 italic' : 'text-slate-200'}`}>{msg.isNotice ? `⟫ ${msg.text}` : msg.text}</p>
+                      <p
+                        className={`text-sm break-words ${msg.isNotice ? 'italic' : ''}`}
+                        style={role === null ? undefined : { color: msg.isNotice ? colorSettings.translation[role] : colorSettings.text[role] }}
+                      >
+                        {msg.isNotice ? `⟫ ${msg.text}` : msg.text}
+                      </p>
                       {msg.translation && (
-                        <p className="text-sm break-words text-cyan-300 italic mt-1">⟫ {msg.translation}</p>
+                        <p className="text-sm break-words italic mt-1" style={role === null ? undefined : { color: colorSettings.translation[role] }}>⟫ {msg.translation}</p>
                       )}
                     </>
                   )}
