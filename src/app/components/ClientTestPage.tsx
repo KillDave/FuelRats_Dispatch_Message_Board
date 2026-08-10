@@ -4,11 +4,8 @@ import type { Case, Injection, Message } from './DispatchBoard';
 import { rescueMessages, dispatchMessages } from '../config/quickMessages';
 import type { QuickMessageGroup } from '../config/quickMessages';
 import { Button } from '@/app/components/ui/button';
-import {
-  findLatestGrabDuration,
-  TIMER_START_RE,
-  TIMER_STOP_RE,
-} from '../services/codeRedTimerService';
+import { findLatestGrabDuration } from '../services/codeRedTimerService';
+import { readRatMessage } from '../services/ratMessageService';
 
 const BUTTON_GROUPS: QuickMessageGroup[] = [
   { label: 'RESCUE', messages: rescueMessages },
@@ -170,28 +167,18 @@ export function ClientTestPage({ onBack }: { onBack: () => void }) {
         isNotice: asNotice || undefined,
       }];
 
-      // wr+/bc+/open start the countdown, fuel+/main menu pause it -- but only
-      // from an assigned rat, and only once something has been grabbed. Same
-      // three conditions the board applies to a real IRC line; the board just
-      // applies them somewhere this page never reaches.
-      let timer = prev.codeRedTimer;
-      const fromAssignedRat = speakerKind === 'rat' && prev.assignedRats.includes(activeRat);
-      if (timer && fromAssignedRat) {
-        if (TIMER_START_RE.test(text) && !timer.running) {
-          timer = { ...timer, running: true, runningSince: now };
-        } else if (TIMER_STOP_RE.test(text) && timer.running) {
-          const elapsed = timer.runningSince
-            ? (now.getTime() - timer.runningSince.getTime()) / 1000
-            : 0;
-          timer = {
-            ...timer,
-            running: false,
-            runningSince: undefined,
-            accumulatedSeconds: timer.accumulatedSeconds + elapsed,
-          };
-        }
-      }
-      return { ...prev, messages, codeRedTimer: timer };
+      // Everything the board would take from this line -- distance reports,
+      // jump calls, rat status, the countdown -- read by the board's own
+      // function rather than a copy of it that can fall behind.
+      const effects = readRatMessage(prev, {
+        text,
+        nick: senderFor(speakerKind),
+        timestamp: now,
+        matchedRatName: speakerKind === 'rat' ? activeRat : null,
+        isAssignedRat: speakerKind === 'rat' && prev.assignedRats.includes(activeRat),
+        ratIrcNicks: prev.ratIrcNicks,
+      });
+      return { ...prev, messages, ...effects };
     });
     setSpeech('');
   };
@@ -430,6 +417,11 @@ export function ClientTestPage({ onBack }: { onBack: () => void }) {
                        onChange={(e) => setAsNotice(e.target.checked)} />
                 Send as a NOTICE (how translations arrive)
               </label>
+              <p className="text-[10px] text-slate-500">
+                Distance and jump reports need the case number, as they do on the board —
+                <code className="text-slate-400"> #0 1.4ly</code>, <code className="text-slate-400">#0 3j</code>.
+                Status calls like <code className="text-slate-400">fr+</code> do not.
+              </p>
             </section>
 
             {/* --- case notes ------------------------------------------- */}

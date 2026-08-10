@@ -15,7 +15,8 @@ import { fuelRatsApi, apiDebug } from '../services/fuelRatsApi';
 import { ircWebSocket, IRCMessage, IRCConnectionStatus } from '../services/ircWebSocket';
 import { IRCConnectionPanel } from './IRCConnectionPanel';
 import { openEdsmPopout } from '../services/edsmPopout';
-import { findLatestGrabDuration, parseManualInput, TIMER_START_RE, TIMER_STOP_RE } from '../services/codeRedTimerService';
+import { findLatestGrabDuration, parseManualInput } from '../services/codeRedTimerService';
+import { readRatMessage } from '../services/ratMessageService';
 import fuelRatsLogo from './image/TransparentBackgroundRatto.png';
 import disconnectIcon from './image/Disconnect_Icon.png';
 import { dispatchMessages, rescueMessages } from '../config/quickMessages';
@@ -1214,113 +1215,22 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
           updatedRatIrcNicks = { ...updatedRatIrcNicks, [matchedRatName]: ircMsg.nick };
         }
 
-        // Detect jump calls: "#N Xj [optional text]"
-        let updatedJumpCalls = c.jumpCalls ?? {};
-        const caseNum = parseInt(c.id.split('-')[1], 10);
-
-        // Detect SC distance reports: "#N ... X.Xly/ls/au" (e.g. "#6 bc+ .41ly")
-        // Skip bot messages — MechaSqueak announcements include system distances (e.g. "97.6 LY from Sol")
-        const isBotNick = ircMsg.nick?.toLowerCase().includes('mechasqueak') ?? false;
-        let updatedScDistance = c.scDistance;
-        if (!isBotNick && new RegExp(`#${caseNum}\\b`).test(displayText)) {
-          const distMatch = displayText.match(/([\d]*\.?[\d]+)\s*(Mls|kls|ls|ly|au)\b/i);
-          if (distMatch) {
-            const val = parseFloat(distMatch[1]);
-            const unit = distMatch[2].toLowerCase();
-            const ls = unit === 'ly' ? val * 31_557_600
-              : unit === 'au' ? val * 499
-              : unit === 'kls' ? val * 1_000
-              : unit === 'mls' ? val * 1_000_000
-              : val;
-            updatedScDistance = { ls, timestamp: ircMsg.timestamp };
-          }
-        }
-        const jumpPattern = new RegExp(`(?:#${caseNum}\\s+(\\d+)j|(\\d+)j\\s+#${caseNum})\\b`, 'i');
-        const jumpMatch = displayText.match(jumpPattern);
-        if (jumpMatch && ircMsg.nick) {
-          updatedJumpCalls = {
-            ...updatedJumpCalls,
-            [ircMsg.nick]: { jumps: parseInt(jumpMatch[1] ?? jumpMatch[2], 10), text: displayText, timestamp: ircMsg.timestamp },
-          };
-        } else if (ircMsg.nick && /\b(?:stdn|stand\s*down)\b/i.test(displayText)) {
-          // Standing down retracts the call: they are not on their way any more,
-          // so a countdown still ticking towards their arrival is worse than
-          // showing nothing. Checked as an else so a message that somehow carries
-          // both still registers the newer jump count.
-          //
-          // Only for someone never assigned, though. An assigned rat's count is
-          // part of the case record and standing down does not unmake the trip;
-          // an unassigned caller was only offering, so it is noise once they
-          // withdraw. The nick is checked against the learned map as well, since
-          // name matching can miss.
-          const nickIsAssigned = isAssignedRat
-            || Object.values(updatedRatIrcNicks).some(n => n?.toLowerCase() === ircMsg.nick!.toLowerCase());
-          if (!nickIsAssigned && updatedJumpCalls[ircMsg.nick]) {
-            const rest = { ...updatedJumpCalls };
-            delete rest[ircMsg.nick];
-            updatedJumpCalls = rest;
-          }
-        }
-
-        // Detect rat status reports: fr±, wr±, sys+, inst±, bc±, fuel+
-        let updatedRatProgress = c.ratProgress ?? {};
-        const ratKey = matchedRatName ?? ircMsg.nick;
-        if (ratKey) {
-          const current = updatedRatProgress[ratKey] ?? {};
-          const updated = { ...current };
-          const statusPatterns: [RegExp, keyof typeof updated, '+' | '-' | true][] = [
-            [/\bfr\s*\+/i,          'fr',   '+'],
-            [/\bfr\s*-/i,           'fr',   '-'],
-            [/\b(?:wr|tm)\s*\+/i,   'wr',   '+'],
-            [/\b(?:wr|tm)\s*-/i,    'wr',   '-'],
-            [/\b(?:bc|inst)\s*\+/i, 'bc',   '+'],
-            [/\b(?:bc|inst)\s*-/i,  'bc',   '-'],
-            [/\bfuel\s*\+/i,        'fuel', true],
-          ];
-          // fuel is a case-level first-delivery flag — only the first rat to report it is marked
-          const fuelAlreadyClaimed = Object.values(updatedRatProgress).some((p) => p.fuel);
-          let changed = false;
-          for (const [pattern, key, value] of statusPatterns) {
-            if (pattern.test(displayText)) {
-              if (key === 'fuel' && fuelAlreadyClaimed) continue;
-              (updated as Record<string, unknown>)[key] = value;
-              changed = true;
-            }
-          }
-          if (changed) {
-            updatedRatProgress = { ...updatedRatProgress, [ratKey]: updated };
-          }
-        }
-
-        // Flip the O2 countdown on wr/bc/"open" (start) or fuel+/quit-to-menu
-        // (stop) -- but only from an assigned rat, and only once a duration has
-        // actually been grabbed. Quitting to the menu isn't necessarily the case
-        // ending (the rat may still be a long way out), so this pauses rather
-        // than clears the timer, and picks back up if wr/bc/open comes again.
-        let updatedCodeRedTimer = c.codeRedTimer;
-        if (updatedCodeRedTimer && isAssignedRat) {
-          if (TIMER_START_RE.test(displayText) && !updatedCodeRedTimer.running) {
-            updatedCodeRedTimer = { ...updatedCodeRedTimer, running: true, runningSince: ircMsg.timestamp };
-          } else if (TIMER_STOP_RE.test(displayText) && updatedCodeRedTimer.running) {
-            const elapsed = updatedCodeRedTimer.runningSince
-              ? (ircMsg.timestamp.getTime() - updatedCodeRedTimer.runningSince.getTime()) / 1000
-              : 0;
-            updatedCodeRedTimer = {
-              ...updatedCodeRedTimer,
-              running: false,
-              runningSince: undefined,
-              accumulatedSeconds: updatedCodeRedTimer.accumulatedSeconds + elapsed,
-            };
-          }
-        }
+        // Distance reports, jump calls, rat status and the O2 countdown, all
+        // read by readRatMessage so the client test page can reach exactly the
+        // same logic instead of an approximation of it.
+        const effects = readRatMessage(c, {
+          text: displayText,
+          nick: ircMsg.nick,
+          timestamp: ircMsg.timestamp,
+          matchedRatName,
+          isAssignedRat,
+          ratIrcNicks: updatedRatIrcNicks,
+        });
 
         return {
           ...c,
           ratIrcNicks: updatedRatIrcNicks,
-          scDistance: updatedScDistance,
-          jumpCalls: updatedJumpCalls,
-          ratProgress: updatedRatProgress,
-          codeRedTimer: updatedCodeRedTimer,
+          ...effects,
           messages: [...c.messages, newMessage],
         };
       });
