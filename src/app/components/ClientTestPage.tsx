@@ -14,6 +14,9 @@ const BUTTON_GROUPS: QuickMessageGroup[] = [
 
 /** Everything the setup panel can change about the case being tested. */
 interface Setup {
+  /** Distance and jump reports are matched against "#N", so this has to be
+   *  settable -- a sandbox fixed at case 0 silently drops "#1 bc+ 32kls". */
+  caseNumber: string;
   clientName: string;
   ircNick: string;
   system: string;
@@ -25,6 +28,7 @@ interface Setup {
 }
 
 const DEFAULT_SETUP: Setup = {
+  caseNumber: '1',
   clientName: 'TestClient',
   ircNick: 'TestClient',
   system: 'Fuelum',
@@ -53,8 +57,9 @@ function newId(prefix: string): string {
  */
 function buildCase(setup: Setup): Case {
   const rats = splitRats(setup.rats);
+  const caseNumber = setup.caseNumber.trim() || '0';
   return {
-    id: 'case-00',
+    id: `case-${caseNumber.padStart(2, '0')}`,
     clientName: setup.clientName,
     ircNick: setup.ircNick || setup.clientName,
     system: setup.system,
@@ -70,14 +75,25 @@ function buildCase(setup: Setup): Case {
         isSystem: true,
       },
     ],
+    // Both seeded quotes are built from the setup, never written out. The one
+    // this replaced said "Calling in for case 0" with the number typed into it,
+    // so a case set to anything else opened with a quote naming a case that was
+    // not the one you were looking at.
     injections: [
       {
         id: newId('q'),
         author: 'RatMama[BOT]',
         text: `<${setup.clientName}> Ratsignal! I'm out of fuel in ${setup.system}, please send a rat!`,
-        createdAt: new Date(),
+        createdAt: new Date(Date.now() - 5 * 60 * 1000),
         isBot: true,
       },
+      ...(rats.length > 0 ? [{
+        id: newId('q'),
+        author: 'MechaSqueak[BOT]',
+        text: `<${rats[0]}> Calling in for case ${caseNumber}`,
+        createdAt: new Date(Date.now() - 3 * 60 * 1000),
+        isBot: true,
+      }] : []),
     ],
     assignedRats: rats,
     ratIrcNicks: {},
@@ -231,6 +247,7 @@ export function ClientTestPage({ onBack }: { onBack: () => void }) {
     const rebuilt = splitRats(setup.rats);
     setCaseData((prev) => ({
       ...prev,
+      id: `case-${(setup.caseNumber.trim() || '0').padStart(2, '0')}`,
       clientName: setup.clientName,
       ircNick: setup.ircNick || setup.clientName,
       system: setup.system,
@@ -319,6 +336,11 @@ export function ClientTestPage({ onBack }: { onBack: () => void }) {
             <section className="p-3 border-b border-slate-700/60 flex flex-col gap-2">
               <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Case setup</p>
               <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <p className={label}>Case #</p>
+                  <input className={field} value={setup.caseNumber} inputMode="numeric"
+                         onChange={(e) => setSetup({ ...setup, caseNumber: e.target.value })} />
+                </div>
                 <div>
                   <p className={label}>Client name</p>
                   <input className={field} value={setup.clientName}
@@ -419,7 +441,8 @@ export function ClientTestPage({ onBack }: { onBack: () => void }) {
               </label>
               <p className="text-[10px] text-slate-500">
                 Distance and jump reports need the case number, as they do on the board —
-                <code className="text-slate-400"> #0 1.4ly</code>, <code className="text-slate-400">#0 3j</code>.
+                <code className="text-slate-400"> #{setup.caseNumber} 32kls</code>,{' '}
+                <code className="text-slate-400">#{setup.caseNumber} 3j</code>.
                 Status calls like <code className="text-slate-400">fr+</code> do not.
               </p>
             </section>
