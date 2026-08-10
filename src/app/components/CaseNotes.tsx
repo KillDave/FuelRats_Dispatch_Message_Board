@@ -15,9 +15,9 @@ import type { Injection } from './DispatchBoard';
  * way. The trailing group is deliberately anchored to the literal "(Translation:"
  * so an ordinary parenthetical -- `#7 1j (Using Horizons)` -- stays in the body.
  */
-const QUOTED = /^<([^>]+)>\s*([\s\S]+?)(?:\s*\(Translation:\s*([\s\S]+)\))?$/;
+export const QUOTED = /^<([^>]+)>\s*([\s\S]+?)(?:\s*\(Translation:\s*([\s\S]+)\))?$/;
 
-function parseNote(text: string) {
+export function parseNote(text: string) {
   const m = text.match(QUOTED);
   if (!m) return { speaker: undefined, body: text, translation: undefined };
   return { speaker: m[1], body: m[2].trim(), translation: m[3]?.trim() };

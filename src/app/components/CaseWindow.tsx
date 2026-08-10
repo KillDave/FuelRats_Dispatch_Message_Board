@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import disconnectIcon from './image/Disconnect_Icon.png';
-import type { Case, CaseStatus } from './DispatchBoard';
+import { CodeRedTimerBadge, type Case, type CaseStatus } from './DispatchBoard';
 import { CopyableSystem } from './CopyableSystem';
 import { CaseNotes } from './CaseNotes';
 import { ClientHistory } from './CaseHistory';
@@ -50,6 +50,7 @@ interface CaseWindowProps {
   clientInChannel: boolean;
   buttonGroups?: QuickMessageGroup[];
   onSetTranslation: (caseId: string, messageId: string, translation: string) => void;
+  onSetCodeRedTimer: (caseId: string, seconds: number) => void;
 }
 
 const statusColors = {
@@ -86,6 +87,7 @@ export function CaseWindow({
   clientInChannel,
   buttonGroups = DEFAULT_BUTTON_GROUPS,
   onSetTranslation,
+  onSetCodeRedTimer,
 }: CaseWindowProps) {
   const [messageInput, setMessageInput] = useState('');
   const [isFlickering, setIsFlickering] = useState(false);
@@ -790,7 +792,7 @@ export function CaseWindow({
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-2 flex-shrink-0">
+        <div className="flex flex-col items-end gap-0.5 flex-shrink-0">
           <button
             onClick={() => openEdsmPopout(caseData)}
             className="text-2xl font-bold text-orange-400 hover:underline"
@@ -798,6 +800,11 @@ export function CaseWindow({
           >
             {caseData.id.split('-')[1]}
           </button>
+          <CodeRedTimerBadge
+            timer={caseData.codeRedTimer}
+            isCodeRed={caseData.status === 'code-red'}
+            onManualSet={(seconds) => onSetCodeRedTimer(caseData.id, seconds)}
+          />
         </div>
       </div>
 

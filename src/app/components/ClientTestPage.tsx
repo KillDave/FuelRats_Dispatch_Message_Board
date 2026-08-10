@@ -37,10 +37,19 @@ const initialCase: Case = {
       isBot: true,
     },
   ],
-  assignedRats: [],
+  assignedRats: ['Absolver'],
   ratIrcNicks: {},
   clientInChannel: true,
   createdAt: new Date(),
+  // Seeded so the timer badge is visible immediately in the sandbox --
+  // normally set by findLatestGrabDuration() off a real `!grab`.
+  codeRedTimer: {
+    baseSeconds: 7 * 60,
+    lastSeenGrabInjectionId: 'q1',
+    running: true,
+    runningSince: new Date(),
+    accumulatedSeconds: 0,
+  },
 };
 
 /**
@@ -102,6 +111,19 @@ export function ClientTestPage({ onBack }: { onBack: () => void }) {
               setCaseData((prev) => ({
                 ...prev,
                 messages: prev.messages.map((m) => (m.id === messageId ? { ...m, translation } : m)),
+              }))
+            }
+            onSetCodeRedTimer={(_caseId, seconds) =>
+              setCaseData((prev) => ({
+                ...prev,
+                codeRedTimer: {
+                  baseSeconds: seconds,
+                  lastSeenGrabInjectionId: prev.codeRedTimer?.lastSeenGrabInjectionId,
+                  manualOverride: true,
+                  running: prev.codeRedTimer?.running ?? false,
+                  runningSince: prev.codeRedTimer?.running ? new Date() : undefined,
+                  accumulatedSeconds: 0,
+                },
               }))
             }
           />

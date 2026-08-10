@@ -15,6 +15,7 @@ import { fuelRatsApi, apiDebug } from '../services/fuelRatsApi';
 import { ircWebSocket, IRCMessage, IRCConnectionStatus } from '../services/ircWebSocket';
 import { IRCConnectionPanel } from './IRCConnectionPanel';
 import { openEdsmPopout } from '../services/edsmPopout';
+import { findLatestGrabDuration, parseManualInput, TIMER_START_RE, TIMER_STOP_RE } from '../services/codeRedTimerService';
 import fuelRatsLogo from './image/TransparentBackgroundRatto.png';
 import disconnectIcon from './image/Disconnect_Icon.png';
 import { dispatchMessages, rescueMessages } from '../config/quickMessages';
@@ -45,6 +46,87 @@ function CaseTimer({ startTime }: { startTime: Date }) {
   };
 
   return <span>{formatElapsedTime(elapsed)}</span>;
+}
+
+/**
+ * The O2 countdown badge: mm:ss, dimmed while paused so a frozen count reads
+ * differently from a live one. Click it to type a correction when the grab
+ * parser read the client's line wrong -- `onManualSet` is optional so this
+ * still works read-only anywhere it's just informational.
+ *
+ * `isCodeRed` keeps the box on screen even before any estimate has been
+ * parsed -- a code red with no timer yet still needs a place to look for
+ * one and to type a manual correction into, rather than the badge just not
+ * existing until the first qualifying grab shows up.
+ */
+export function CodeRedTimerBadge({
+  timer,
+  isCodeRed = false,
+  onManualSet,
+}: {
+  timer: Case['codeRedTimer'];
+  isCodeRed?: boolean;
+  onManualSet?: (seconds: number) => void;
+}) {
+  const [, forceTick] = useState(0);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+
+  useEffect(() => {
+    if (!timer?.running) return;
+    const interval = setInterval(() => forceTick((n) => n + 1), 1000);
+    return () => clearInterval(interval);
+  }, [timer?.running]);
+
+  if (!timer && !isCodeRed) return null;
+
+  const remaining = timer
+    ? Math.max(0, Math.round(
+        timer.baseSeconds - timer.accumulatedSeconds -
+        (timer.running && timer.runningSince ? (Date.now() - timer.runningSince.getTime()) / 1000 : 0)
+      ))
+    : null;
+  const display = remaining !== null
+    ? `${Math.floor(remaining / 60)}:${(remaining % 60).toString().padStart(2, '0')}`
+    : '--:--';
+
+  const commit = () => {
+    const seconds = parseManualInput(draft);
+    if (seconds !== null) onManualSet?.(seconds);
+    setEditing(false);
+  };
+
+  if (editing) {
+    return (
+      <input
+        autoFocus
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') commit();
+          if (e.key === 'Escape') setEditing(false);
+        }}
+        onClick={(e) => e.stopPropagation()}
+        placeholder="m:ss"
+        className="text-xs text-white border border-red-500/60 bg-red-500/10 rounded px-1.5 py-0.5 font-mono w-14"
+      />
+    );
+  }
+
+  return (
+    <div
+      onClick={onManualSet ? (e) => { e.stopPropagation(); setDraft(remaining !== null ? display : ''); setEditing(true); } : undefined}
+      className={`text-xs text-white border border-red-500/60 bg-red-500/10 rounded px-1.5 py-0.5 font-mono ${timer && !timer.running ? 'opacity-60' : ''} ${onManualSet ? 'cursor-pointer hover:bg-red-500/20' : ''}`}
+      title={
+        (timer ? (timer.running ? 'O2 estimate counting down' : 'O2 estimate (paused)') : 'Code red -- no O2 estimate yet') +
+        (timer?.manualOverride ? ' -- manually set' : '') +
+        (onManualSet ? '. Click to set.' : '')
+      }
+    >
+      {display}
+    </div>
+  );
 }
 
 // Helper component for displaying UTC time with Elite Dangerous year (3312)
@@ -136,6 +218,24 @@ export interface Case {
     fuel?: boolean;
   }>;
   jumpCalls?: Record<string, { jumps: number; text: string; timestamp: Date }>;
+  /**
+   * O2 countdown sourced from a `!grab`'d client quote. Only ticks while a rat
+   * is actually with the client (wr/bc/"open"); freezes on fuel+ or the client
+   * quitting to the main menu, which can happen well before the case is over
+   * if the rat is still a long way out. See codeRedTimerService.ts.
+   */
+  codeRedTimer?: {
+    baseSeconds: number;
+    /** The newest qualifying grab this timer has already reacted to -- a later
+     *  grab with a different id always wins, even over a manual correction. */
+    lastSeenGrabInjectionId?: string;
+    /** True when baseSeconds came from the dispatcher typing a correction rather
+     *  than the grab parser, purely for display -- does not affect precedence. */
+    manualOverride?: boolean;
+    running: boolean;
+    runningSince?: Date;
+    accumulatedSeconds: number;
+  };
   clientInChannel: boolean;
   createdAt: Date;
 }
@@ -569,6 +669,25 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
               return !recentDupe;
             });
 
+            // The O2 estimate itself comes fresh off the just-fetched quotes, but
+            // whether the countdown is running/paused is IRC-derived state that
+            // has to carry over like ratProgress does. Only replace the base
+            // figure when a newer qualifying grab has actually shown up -- and
+            // when it has, it wins even over a dispatcher's manual correction,
+            // since a fresh grab is presumably the more current word from the client.
+            let codeRedTimer = existingCase.codeRedTimer;
+            const latestGrab = findLatestGrabDuration(fetchedCase.injections, fetchedCase.clientName, fetchedCase.ircNick);
+            if (latestGrab && latestGrab.injectionId !== codeRedTimer?.lastSeenGrabInjectionId) {
+              codeRedTimer = {
+                baseSeconds: latestGrab.seconds,
+                lastSeenGrabInjectionId: latestGrab.injectionId,
+                manualOverride: false,
+                running: codeRedTimer?.running ?? false,
+                runningSince: codeRedTimer?.running ? new Date() : undefined,
+                accumulatedSeconds: 0,
+              };
+            }
+
             return {
               ...fetchedCase,
               // Reuse the existing array when nothing arrived. Allocating a new
@@ -584,6 +703,7 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
               nearestSmStation: existingCase.nearestSmStation,
               ratProgress: existingCase.ratProgress,
               jumpCalls: existingCase.jumpCalls,
+              codeRedTimer,
               // Merge ratIrcNicks: live IRC-derived mappings take precedence over API-derived
               ratIrcNicks: { ...fetchedCase.ratIrcNicks, ...existingCase.ratIrcNicks },
             };
@@ -1139,12 +1259,35 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
           }
         }
 
+        // Flip the O2 countdown on wr/bc/"open" (start) or fuel+/quit-to-menu
+        // (stop) -- but only from an assigned rat, and only once a duration has
+        // actually been grabbed. Quitting to the menu isn't necessarily the case
+        // ending (the rat may still be a long way out), so this pauses rather
+        // than clears the timer, and picks back up if wr/bc/open comes again.
+        let updatedCodeRedTimer = c.codeRedTimer;
+        if (updatedCodeRedTimer && isAssignedRat) {
+          if (TIMER_START_RE.test(displayText) && !updatedCodeRedTimer.running) {
+            updatedCodeRedTimer = { ...updatedCodeRedTimer, running: true, runningSince: ircMsg.timestamp };
+          } else if (TIMER_STOP_RE.test(displayText) && updatedCodeRedTimer.running) {
+            const elapsed = updatedCodeRedTimer.runningSince
+              ? (ircMsg.timestamp.getTime() - updatedCodeRedTimer.runningSince.getTime()) / 1000
+              : 0;
+            updatedCodeRedTimer = {
+              ...updatedCodeRedTimer,
+              running: false,
+              runningSince: undefined,
+              accumulatedSeconds: updatedCodeRedTimer.accumulatedSeconds + elapsed,
+            };
+          }
+        }
+
         return {
           ...c,
           ratIrcNicks: updatedRatIrcNicks,
           scDistance: updatedScDistance,
           jumpCalls: updatedJumpCalls,
           ratProgress: updatedRatProgress,
+          codeRedTimer: updatedCodeRedTimer,
           messages: [...c.messages, newMessage],
         };
       });
@@ -1281,6 +1424,27 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
   const updateCaseStatus = (caseId: string, status: CaseStatus) => {
     setCases((prev) =>
       prev.map((c) => (c.id === caseId ? { ...c, status } : c))
+    );
+  };
+
+  /** Dispatcher typed a correction into the O2 timer badge -- the regex read the grab wrong. */
+  const setCodeRedTimerManual = (caseId: string, seconds: number) => {
+    setCases((prev) =>
+      prev.map((c) => {
+        if (c.id !== caseId) return c;
+        const existing = c.codeRedTimer;
+        return {
+          ...c,
+          codeRedTimer: {
+            baseSeconds: seconds,
+            lastSeenGrabInjectionId: existing?.lastSeenGrabInjectionId,
+            manualOverride: true,
+            running: existing?.running ?? false,
+            runningSince: existing?.running ? new Date() : undefined,
+            accumulatedSeconds: 0,
+          },
+        };
+      })
     );
   };
 
@@ -1532,6 +1696,11 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
                             <EyeOff className="w-4 h-4 text-slate-600" />
                           )}
                         </div>
+                        <CodeRedTimerBadge
+                          timer={caseData.codeRedTimer}
+                          isCodeRed={caseData.status === 'code-red'}
+                          onManualSet={(seconds) => setCodeRedTimerManual(caseData.id, seconds)}
+                        />
                         <span className={`text-xs ${isVisible ? 'text-slate-400' : 'text-slate-600'}`}>
                           {shortPlatform(caseData.platform)}
                         </span>
@@ -1677,6 +1846,7 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
                 clientInChannel={caseData.clientInChannel}
                 buttonGroups={buttonGroups}
                 onSetTranslation={setMessageTranslation}
+                onSetCodeRedTimer={setCodeRedTimerManual}
               />
             ))
           )}
