@@ -114,16 +114,49 @@ export function CodeRedTimerBadge({
     );
   }
 
+  /*
+   * Running and paused used to differ by opacity-60 alone -- a dimmed red
+   * against a red, on a badge two characters wide. Whether the number in front
+   * of you is still falling is the single most important thing about it, and it
+   * was the hardest thing to see.
+   *
+   * They are now different colours rather than different brightnesses of one.
+   * Red is reserved for a countdown actually running; a paused one goes slate,
+   * the same inert grey the rest of the board uses for things that are not
+   * happening. Waiting on a first estimate keeps red but dashed, since that is
+   * a code red with a number still missing rather than a stopped clock.
+   *
+   * The dot carries the same distinction without relying on colour, which
+   * matters for the reds and greys specifically -- they are the pair most often
+   * confused, and this badge is read in a hurry.
+   */
+  const state = !timer ? 'awaiting' : timer.running ? 'running' : 'paused';
+  const tone = {
+    running: 'border-red-500 bg-red-500/20 text-white',
+    paused: 'border-slate-500 bg-slate-700/50 text-slate-300',
+    awaiting: 'border-dashed border-red-500/60 bg-red-500/5 text-red-200',
+  }[state];
+  const hover = onManualSet
+    ? state === 'paused' ? 'cursor-pointer hover:bg-slate-600/60' : 'cursor-pointer hover:bg-red-500/30'
+    : '';
+
   return (
     <div
       onClick={onManualSet ? (e) => { e.stopPropagation(); setDraft(remaining !== null ? display : ''); setEditing(true); } : undefined}
-      className={`text-xs text-white border border-red-500/60 bg-red-500/10 rounded px-1.5 py-0.5 font-mono ${timer && !timer.running ? 'opacity-60' : ''} ${onManualSet ? 'cursor-pointer hover:bg-red-500/20' : ''}`}
+      className={`inline-flex items-center gap-1.5 text-xs border rounded px-1.5 py-0.5 font-mono ${tone} ${hover}`}
       title={
         (timer ? (timer.running ? 'O2 estimate counting down' : 'O2 estimate (paused)') : 'Code red -- no O2 estimate yet') +
         (timer?.manualOverride ? ' -- manually set' : '') +
         (onManualSet ? '. Click to set.' : '')
       }
     >
+      <span
+        className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+          state === 'running' ? 'bg-red-400 animate-pulse'
+            : state === 'paused' ? 'bg-slate-400'
+            : 'bg-red-400/50'
+        }`}
+      />
       {display}
     </div>
   );
