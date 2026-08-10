@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { CaseWindow } from './CaseWindow';
-import type { Case, Injection, Message } from './DispatchBoard';
+import type { Case, CaseStatus, Injection, Message } from './DispatchBoard';
 import { rescueMessages, dispatchMessages } from '../config/quickMessages';
 import type { QuickMessageGroup } from '../config/quickMessages';
 import { Button } from '@/app/components/ui/button';
@@ -17,6 +17,9 @@ interface Setup {
   /** Distance and jump reports are matched against "#N", so this has to be
    *  settable -- a sandbox fixed at case 0 silently drops "#1 bc+ 32kls". */
   caseNumber: string;
+  /** Code red is the one worth reaching for: it colours the case, drives the
+   *  flash, and makes the O2 badge appear before anything has been grabbed. */
+  status: CaseStatus;
   clientName: string;
   ircNick: string;
   system: string;
@@ -29,6 +32,7 @@ interface Setup {
 
 const DEFAULT_SETUP: Setup = {
   caseNumber: '1',
+  status: 'open',
   clientName: 'TestClient',
   ircNick: 'TestClient',
   system: 'Fuelum',
@@ -39,6 +43,14 @@ const DEFAULT_SETUP: Setup = {
 };
 
 const PLATFORMS = ['PC - Odyssey', 'PC - Horizons', 'Xbox', 'PlayStation'];
+
+const STATUSES: [CaseStatus, string][] = [
+  ['open', 'Open'],
+  ['assigned', 'Assigned'],
+  ['code-red', 'Code red'],
+  ['inactive', 'Inactive'],
+  ['closed', 'Closed'],
+];
 
 function splitRats(rats: string): string[] {
   return rats.split(',').map((r) => r.trim()).filter(Boolean);
@@ -65,7 +77,7 @@ function buildCase(setup: Setup): Case {
     system: setup.system,
     platform: setup.platform,
     language: setup.language,
-    status: 'open',
+    status: setup.status,
     messages: [
       {
         id: newId('m'),
@@ -248,6 +260,7 @@ export function ClientTestPage({ onBack }: { onBack: () => void }) {
     setCaseData((prev) => ({
       ...prev,
       id: `case-${(setup.caseNumber.trim() || '0').padStart(2, '0')}`,
+      status: setup.status,
       clientName: setup.clientName,
       ircNick: setup.ircNick || setup.clientName,
       system: setup.system,
@@ -360,6 +373,13 @@ export function ClientTestPage({ onBack }: { onBack: () => void }) {
                   <p className={label}>Language</p>
                   <input className={field} value={setup.language}
                          onChange={(e) => setSetup({ ...setup, language: e.target.value })} />
+                </div>
+                <div>
+                  <p className={label}>Status</p>
+                  <select className={field} value={setup.status}
+                          onChange={(e) => setSetup({ ...setup, status: e.target.value as CaseStatus })}>
+                    {STATUSES.map(([value, text]) => <option key={value} value={value}>{text}</option>)}
+                  </select>
                 </div>
                 <div>
                   <p className={label}>Platform</p>
