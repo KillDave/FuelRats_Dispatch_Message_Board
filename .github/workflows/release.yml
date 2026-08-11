@@ -1,16 +1,20 @@
 # Builds a release when a version tag is pushed.
 #
-#   git tag -a v2.0.8 --cleanup=verbatim -F notes.md
-#   git push origin v2.0.8
+# Two routes in, and they arrive very differently:
 #
-# --cleanup=verbatim matters: git strips lines beginning with '#' from a tag
-# message by default, which silently eats every markdown heading in the notes.
+#   From a terminal     git tag -a v2.0.8 --cleanup=verbatim -F notes.md
+#                       git push origin v2.0.8
+#                       No release exists yet, so one is created as a draft.
 #
-# The release is left as a DRAFT with the assets already attached, so it is
-# never public without them. That gap is not hypothetical here -- the board
-# checks for updates every ten minutes and hands the answer to installer.py,
-# which fails outright on a release carrying neither FRBoard.exe nor a
-# Dispatch_Board_*.zip. Publishing is a button, once you have read it over.
+#   From the GitHub UI  Publishing a release creates the tag as a side effect.
+#                       By the time this runs the release already exists, is
+#                       already public, and already carries the notes just
+#                       written in the editor -- so it is left alone and only
+#                       given its files.
+#
+# --cleanup=verbatim matters on the first route: git strips lines beginning
+# with '#' from a tag message by default, which silently eats every markdown
+# heading in the notes.
 name: Release
 
 on:
@@ -94,8 +98,7 @@ jobs:
           # It is held as a repository secret for tidiness and rotation, not
           # for confidentiality: this is a public OAuth client id for a PKCE
           # flow, and it is already readable in the JavaScript of every release
-          # that has ever shipped. Treat a missing value as a broken build,
-          # not as a leak risk.
+          # that has ever shipped.
           VITE_CLIENT_ID: ${{ secrets.VITE_CLIENT_ID }}
         run: npm run build:release
 
@@ -111,31 +114,69 @@ jobs:
           path: release/
           retention-days: 14
 
-      - name: Draft the release
+      # Attach to whatever release already exists for this tag, and create one
+      # only when there is none.
+      #
+      # Creating unconditionally produced two releases on a single tag: the one
+      # published from the UI, public and empty, and this workflow's draft
+      # holding every file. An existing release therefore keeps its title, body
+      # and draft state untouched -- this step's whole job then is the assets.
+      - name: Attach the build to the release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
         run: |
-          # First line of the tag message becomes the title, the rest the body
-          # -- the same shape as a commit message, and the shape these notes are
-          # already written in.
-          MSG="$(git tag -l --format='%(contents)' "$GITHUB_REF_NAME")"
-          TITLE="$(printf '%s\n' "$MSG" | head -1)"
-          BODY="$(printf '%s\n' "$MSG" | tail -n +2)"
+          set -euo pipefail
 
-          if [ -z "$TITLE" ]; then
-            # A lightweight tag carries no message. Fall back rather than
-            # publishing something with an empty title.
-            TITLE="$GITHUB_REF_NAME"
-            printf '%s' "$BODY" > notes.md
-            gh release create "$GITHUB_REF_NAME" --draft --generate-notes \
-              --title "$TITLE" release/*
+          # Drafts are invisible to /releases/tags/{tag}, so the list endpoint
+          # is the only way to find one by tag name. jq reads the tag out of the
+          # environment rather than having the shell interpolate it, which keeps
+          # the quoting survivable.
+          find_release() {
+            gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
+              --jq '[.[] | select(.tag_name==env.TAG)] | first | .id // empty'
+          }
+
+          REL_ID="$(find_release)"
+
+          if [ -z "$REL_ID" ]; then
+            # A lightweight tag carries no message of its own, and %(contents)
+            # quietly falls back to the tagged commit's message -- which reads
+            # like release notes without being any. Only trust an annotated tag.
+            if [ "$(git cat-file -t "$TAG")" = "tag" ]; then
+              git tag -l --format='%(contents)' "$TAG" > tagmsg.txt
+              TITLE="$(head -1 tagmsg.txt)"
+              tail -n +2 tagmsg.txt > notes.md
+              gh release create "$TAG" --draft --title "$TITLE" --notes-file notes.md
+            else
+              echo "::notice::$TAG is a lightweight tag and carries no notes of its own. Generating them."
+              gh release create "$TAG" --draft --title "$TAG" --generate-notes
+            fi
+            REL_ID="$(find_release)"
+            echo "created draft release $REL_ID"
           else
-            printf '%s' "$BODY" > notes.md
-            gh release create "$GITHUB_REF_NAME" --draft \
-              --title "$TITLE" --notes-file notes.md release/*
+            echo "release $REL_ID already exists for $TAG - attaching assets, leaving its notes alone"
           fi
 
-          echo "Drafted: $(gh release view "$GITHUB_REF_NAME" --json url --jq .url)"
-          echo "### Draft release ready — review and publish" >> "$GITHUB_STEP_SUMMARY"
-          gh release view "$GITHUB_REF_NAME" --json url --jq .url >> "$GITHUB_STEP_SUMMARY"
+          UPLOAD="$(gh api "repos/$GITHUB_REPOSITORY/releases/$REL_ID" --jq .upload_url | sed 's/{.*//')"
+
+          for f in release/*; do
+            NAME="$(basename "$f")"
+            # A re-run has to replace rather than collide.
+            OLD="$(NAME="$NAME" gh api "repos/$GITHUB_REPOSITORY/releases/$REL_ID/assets" \
+              --jq '[.[] | select(.name==env.NAME)] | first | .id // empty')"
+            if [ -n "$OLD" ]; then
+              gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/assets/$OLD" >/dev/null
+            fi
+            curl -sS -X POST "$UPLOAD?name=$NAME" \
+              -H "Authorization: token $GH_TOKEN" \
+              -H "Content-Type: application/octet-stream" \
+              --data-binary @"$f" -o /dev/null -w "  uploaded %{http_code}  $NAME"
+            echo
+          done
+
+          URL="$(gh api "repos/$GITHUB_REPOSITORY/releases/$REL_ID" --jq .html_url)"
+          DRAFT="$(gh api "repos/$GITHUB_REPOSITORY/releases/$REL_ID" --jq .draft)"
+          echo "### Assets attached (draft=$DRAFT)" >> "$GITHUB_STEP_SUMMARY"
+          echo "$URL" >> "$GITHUB_STEP_SUMMARY"
