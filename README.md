@@ -157,3 +157,9 @@ Click **Login** and you'll be redirected to [fuelrats.com](https://fuelrats.com)
 - Nick change detection and deduplication
 - AdiIRC and HexChat script support (see `scripts/IRC/`)
 - Optional `fr-dispatch://` protocol handler for one-click bridge launch
+
+---
+
+## Changelog
+
+Release history lives in [CHANGELOG.md](CHANGELOG.md).
