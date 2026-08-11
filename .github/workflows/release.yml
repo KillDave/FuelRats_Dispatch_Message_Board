@@ -1,0 +1,141 @@
+# Builds a release when a version tag is pushed.
+#
+#   git tag -a v2.0.8 --cleanup=verbatim -F notes.md
+#   git push origin v2.0.8
+#
+# --cleanup=verbatim matters: git strips lines beginning with '#' from a tag
+# message by default, which silently eats every markdown heading in the notes.
+#
+# The release is left as a DRAFT with the assets already attached, so it is
+# never public without them. That gap is not hypothetical here -- the board
+# checks for updates every ten minutes and hands the answer to installer.py,
+# which fails outright on a release carrying neither FRBoard.exe nor a
+# Dispatch_Board_*.zip. Publishing is a button, once you have read it over.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    # Windows, not by preference: PyInstaller cannot cross-compile, so the two
+    # .exe files can only be produced on the platform they run on.
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The annotated tag object itself, not just the commit -- the release
+          # notes are read out of its message below.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # Before anything is built. The tag is what the updater compares against
+      # __APP_VERSION__, which is baked in from package.json at build time -- so
+      # if the two disagree the released binary misreports its own version and
+      # every board either offers an update forever or never notices one.
+      - name: Check the tag matches package.json
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG="$(node -p "require('./package.json').version")"
+          echo "tag: $TAG    package.json: $PKG"
+          if [ "$TAG" != "$PKG" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match package.json ($PKG). Bump package.json, commit, then retag."
+            exit 1
+          fi
+
+      # An empty client id builds cleanly and produces a board where sign-in
+      # simply does not work -- no error at build time, and nothing visibly
+      # wrong until somebody tries to use it.
+      - name: Check the signing-in client id is present
+        shell: bash
+        run: |
+          if [ -z "${{ secrets.VITE_CLIENT_ID }}" ]; then
+            echo "::error::Repository secret VITE_CLIENT_ID is not set. The build would ship a board that cannot sign in."
+            exit 1
+          fi
+          echo "VITE_CLIENT_ID is set."
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          npm ci
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pyinstaller
+
+      # vite build, then both PyInstaller passes, then the zips. A fresh runner
+      # is also what makes this trustworthy: PyInstaller reuses whatever it
+      # collected into its workpath last time, which on a developer machine has
+      # shipped a board nobody built, under a convincingly fresh timestamp.
+      # There is nothing to reuse here.
+      - name: Build the release
+        env:
+          # Vite inlines VITE_* at build time, and reads them straight from the
+          # process environment -- no .env file is needed on the runner, which
+          # is just as well since .env is gitignored and never reaches CI.
+          #
+          # It is held as a repository secret for tidiness and rotation, not
+          # for confidentiality: this is a public OAuth client id for a PKCE
+          # flow, and it is already readable in the JavaScript of every release
+          # that has ever shipped. Treat a missing value as a broken build,
+          # not as a leak risk.
+          VITE_CLIENT_ID: ${{ secrets.VITE_CLIENT_ID }}
+        run: npm run build:release
+
+      - name: Show what was produced
+        shell: bash
+        run: ls -la release/
+
+      # Kept even if the release step fails, so a build is never thrown away
+      # for a reason as small as a bad token or a name collision.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ github.ref_name }}
+          path: release/
+          retention-days: 14
+
+      - name: Draft the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # First line of the tag message becomes the title, the rest the body
+          # -- the same shape as a commit message, and the shape these notes are
+          # already written in.
+          MSG="$(git tag -l --format='%(contents)' "$GITHUB_REF_NAME")"
+          TITLE="$(printf '%s\n' "$MSG" | head -1)"
+          BODY="$(printf '%s\n' "$MSG" | tail -n +2)"
+
+          if [ -z "$TITLE" ]; then
+            # A lightweight tag carries no message. Fall back rather than
+            # publishing something with an empty title.
+            TITLE="$GITHUB_REF_NAME"
+            printf '%s' "$BODY" > notes.md
+            gh release create "$GITHUB_REF_NAME" --draft --generate-notes \
+              --title "$TITLE" release/*
+          else
+            printf '%s' "$BODY" > notes.md
+            gh release create "$GITHUB_REF_NAME" --draft \
+              --title "$TITLE" --notes-file notes.md release/*
+          fi
+
+          echo "Drafted: $(gh release view "$GITHUB_REF_NAME" --json url --jq .url)"
+          echo "### Draft release ready — review and publish" >> "$GITHUB_STEP_SUMMARY"
+          gh release view "$GITHUB_REF_NAME" --json url --jq .url >> "$GITHUB_STEP_SUMMARY"
