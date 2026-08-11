@@ -1,7 +1,6 @@
 # FuelRats Dispatch Board
 
 [![CI](https://github.com/KillDave/FuelRats_Dispatch_Message_Board/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/KillDave/FuelRats_Dispatch_Message_Board/actions/workflows/ci.yml)
-[![Release](https://github.com/KillDave/FuelRats_Dispatch_Message_Board/actions/workflows/release.yml/badge.svg)](https://github.com/KillDave/FuelRats_Dispatch_Message_Board/actions/workflows/release.yml)
 [![Latest release](https://img.shields.io/github/v/release/KillDave/FuelRats_Dispatch_Message_Board?label=latest)](https://github.com/KillDave/FuelRats_Dispatch_Message_Board/releases/latest)
 
 A browser-based dispatch tool for Fuel Rats dispatchers, connecting to the FuelRats API and IRC bridge to manage active rescues in real time.
