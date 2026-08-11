@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+
+# A second push supersedes the first: only the newest commit's answer matters.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    # Ubuntu, unlike the release job -- nothing here is packaged, so there is no
+    # PyInstaller and no reason to pay for a Windows runner.
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Type check
+        run: npm run typecheck
+
+      # Still worth running after the type check: these catch different things.
+      # A type error is a bug in the code; a build failure is usually a bad
+      # import path or a missing asset, which types have no opinion about.
+      - name: Build
+        env:
+          # Not the real one, and it does not need to be: nothing here signs in.
+          # It is set only because an empty VITE_CLIENT_ID would make this build
+          # differ from the one that ships, and a check should exercise the same
+          # path as the thing it is checking.
+          VITE_CLIENT_ID: ci-typecheck-placeholder
+        run: npm run build
+
+      # The bridge and the installer are packaged by the release workflow, which
+      # only runs on a tag -- so a syntax error in either would otherwise sit
+      # undiscovered until release day.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Compile the Python scripts
+        run: python -m compileall -q scripts/python

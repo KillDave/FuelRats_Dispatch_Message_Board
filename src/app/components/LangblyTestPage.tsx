@@ -86,7 +86,12 @@ export function LangblyTestPage({ onBack }: { onBack: () => void }) {
         setStatus('error');
         return;
       }
-      const translation = data.data?.translations?.[0];
+      // Narrowed the same way the error branch above does. `data` is parsed
+      // JSON typed as Record<string, unknown>, so reaching through it needs a
+      // shape -- and it is nullable, which is the half that would actually
+      // throw if the proxy ever answered 200 with an empty body.
+      const translation = (data as { data?: { translations?: TranslateResult[] } } | null)
+        ?.data?.translations?.[0];
       if (!translation) { setError('API returned no translations.'); setStatus('error'); return; }
       setResult(translation as TranslateResult);
       setStatus('success');

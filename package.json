@@ -10,6 +10,7 @@
   "scripts": {
     "dev": "vite --open",
     "build": "vite build",
+    "typecheck": "tsc --noEmit",
     "bridge": "python scripts/python/node.py",
     "bridge:build": "python -m PyInstaller --onefile --name bridge --exclude-module cryptography --distpath bridge-dist --workpath bridge-dist/build --specpath bridge-dist scripts/python/node.py",
     "board:build": "node -e \"const f=require('fs');f.rmSync('bridge-dist/build/FRBoard',{recursive:true,force:true});f.rmSync('bridge-dist/dist',{recursive:true,force:true})\" && python -m PyInstaller --noconfirm --onefile --name FRBoard --exclude-module cryptography --add-data \"../dist;dist\" --distpath bridge-dist --workpath bridge-dist/build --specpath bridge-dist scripts/python/node.py",
@@ -42,8 +43,8 @@
     "@radix-ui/react-slot": "1.1.2",
     "@radix-ui/react-switch": "1.1.3",
     "@radix-ui/react-tabs": "1.1.3",
-    "@radix-ui/react-toggle-group": "1.1.2",
     "@radix-ui/react-toggle": "1.1.2",
+    "@radix-ui/react-toggle-group": "1.1.2",
     "@radix-ui/react-tooltip": "1.1.8",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
@@ -63,8 +64,10 @@
   },
   "devDependencies": {
     "@tailwindcss/vite": "4.1.12",
+    "@types/react-dom": "^19.2.4",
     "@vitejs/plugin-react": "4.7.0",
     "tailwindcss": "4.1.12",
+    "typescript": "^5.9.3",
     "vite": "6.3.5"
   },
   "peerDependencies": {
