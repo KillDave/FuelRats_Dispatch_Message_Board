@@ -79,14 +79,41 @@ function isNewer(candidate: string, current: string): boolean {
   return false;
 }
 
+/**
+ * Whether that release is one the installer could actually act on.
+ *
+ * A release exists the moment it is published; its files arrive afterwards,
+ * and on a slow build that gap is minutes. The badge used to appear on the
+ * strength of a version number alone, so a board checking during the gap
+ * offered an update that installer.py then refused outright -- it wants
+ * FRBoard.exe, or a Dispatch_Board_*.zip for the older split builds, and gives
+ * up if neither is there. The dispatcher saw a button that did nothing, for a
+ * reason no part of the board explained.
+ *
+ * The test is deliberately the installer's own, so the badge cannot promise
+ * something the installer will decline. It costs nothing: the asset list is
+ * already in the reply we fetched for the tag name.
+ */
+function hasInstallableAsset(body: unknown): boolean {
+  const assets = (body as { assets?: unknown })?.assets;
+  if (!Array.isArray(assets)) return false;
+  const names = assets.map((a) => String((a as { name?: unknown })?.name ?? ''));
+  return names.includes('FRBoard.exe') || names.some((n) => n.startsWith('Dispatch_Board_'));
+}
+
 /** The newest release, or null when this is already it. */
 export async function checkForUpdate(): Promise<UpdateInfo | null> {
   try {
     const cached = localStorage.getItem(CACHE_KEY);
     if (cached) {
-      const { at, latest, url } = JSON.parse(cached) as { at: number } & UpdateInfo;
+      const { at, latest, url, installable } = JSON.parse(cached) as
+        { at: number; installable?: boolean } & UpdateInfo;
       if (Date.now() - at < CACHE_MS) {
-        return isNewer(latest, __APP_VERSION__) ? { latest, url } : null;
+        // installable is absent in entries written by older builds; treating
+        // that as true keeps their behaviour rather than suppressing a real
+        // update for the two minutes it takes the entry to expire.
+        const usable = installable !== false;
+        return usable && isNewer(latest, __APP_VERSION__) ? { latest, url } : null;
       }
     }
   } catch {
@@ -101,8 +128,9 @@ export async function checkForUpdate(): Promise<UpdateInfo | null> {
     const url = String(body.html_url ?? '');
     if (!latest) return null;
 
-    localStorage.setItem(CACHE_KEY, JSON.stringify({ at: Date.now(), latest, url }));
-    return isNewer(latest, __APP_VERSION__) ? { latest, url } : null;
+    const installable = hasInstallableAsset(body);
+    localStorage.setItem(CACHE_KEY, JSON.stringify({ at: Date.now(), latest, url, installable }));
+    return installable && isNewer(latest, __APP_VERSION__) ? { latest, url } : null;
   } catch {
     // Offline, rate-limited, or GitHub having a moment. None of those are
     // worth telling a dispatcher about mid-case.
