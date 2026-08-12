@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { AlertTriangle } from 'lucide-react';
-import type { Case } from './DispatchBoard';
+import { CodeRedTimerBadge, type Case } from './DispatchBoard';
 import type { AccountCardDist } from '../hooks/useRatAccounts';
 import { CopyableSystem } from './CopyableSystem';
 
@@ -68,6 +68,12 @@ export function RatCaseCard({ caseData, onSelect, accountDistances = [], onPlotJ
                 <AlertTriangle className="w-3 h-3" /> CODE RED
               </span>
             )}
+            {/* Read-only: the card is a button, and a clickable badge inside it
+                would either swallow the click or open the case by accident. */}
+            <CodeRedTimerBadge
+              timer={caseData.codeRedTimer}
+              isCodeRed={caseData.status === 'code-red'}
+            />
             {caseData.status === 'inactive' && (
               <span className="text-xs font-semibold text-slate-300 border border-slate-500/60 bg-slate-500/20 rounded px-1.5 py-0.5">
                 INACTIVE
