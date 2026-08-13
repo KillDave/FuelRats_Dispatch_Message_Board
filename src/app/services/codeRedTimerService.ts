@@ -135,7 +135,7 @@ export function parseManualInput(text: string): number | null {
 }
 
 /** A rat reporting they've reached the client: wing request, beacon, or "open". */
-export const TIMER_START_RE = /\b(?:wr|tm)\s*\+|\b(?:bc|inst)\s*\+|\bopen\b/i;
+export const TIMER_START_RE = /\b(?:wr|tm)\s*\+|\b(?:bc|inst)\s*\+|\bopen\b|\bsysconf\b/i;
 
 /** Fuel delivered, or the client quit to the main menu (may resume later). */
 export const TIMER_STOP_RE = /\bfuel\s*\+|\bmm(?:conf(?:irm)?)?\b(?!\s*-)|\bmain\s*menu/i;
