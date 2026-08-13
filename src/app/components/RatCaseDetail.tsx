@@ -23,8 +23,8 @@ interface EdsmStation {
 
 interface RatData {
   scoopable?: boolean;
-  nearestLStation?: { name: string; distanceToArrival: number; type: string };
-  nearestSmStation?: { name: string; distanceToArrival: number; type: string };
+  /** Dockable without landing, nearest first. See isPlanetary below. */
+  orbitalStations: EdsmStation[];
   allStations: EdsmStation[];
   bodies: EdsmBody[];
   status: 'idle' | 'loading' | 'done' | 'error';
@@ -45,6 +45,12 @@ const borderByStatus: Record<string, string> = {
 
 const isFC = (t: string) => t === 'Fleet Carrier';
 const isLPad = (t: string) => !['Outpost', 'Planetary Outpost'].includes(t);
+/**
+ * Sits on a planet rather than in orbit. Matched on the words because EDSM
+ * spells these several ways -- Planetary Outpost/Port/Settlement, Planetary
+ * Engineer Base, Odyssey Settlement -- and keeps adding more.
+ */
+const isPlanetary = (t: string) => /planetary|settlement/i.test(t);
 
 function formatLs(ls: number): string {
   if (ls >= 1_000_000) return `${(ls / 1_000_000).toFixed(2)}Mls`;
@@ -93,7 +99,7 @@ function SectionHeader({
 
 export function RatCaseDetail({ caseData, isClosed = false, onClose }: RatCaseDetailProps) {
   const [elapsed, setElapsed] = useState(0);
-  const [ratData, setRatData] = useState<RatData>({ bodies: [], allStations: [], status: 'idle' });
+  const [ratData, setRatData] = useState<RatData>({ bodies: [], allStations: [], orbitalStations: [], status: 'idle' });
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [stationSort, setStationSort] = useState<'alpha' | 'distance'>('alpha');
   const toggleSection = (key: string) =>
@@ -113,7 +119,7 @@ export function RatCaseDetail({ caseData, isClosed = false, onClose }: RatCaseDe
     const controller = new AbortController();
     const { signal } = controller;
 
-    setRatData({ bodies: [], allStations: [], status: 'loading' });
+    setRatData({ bodies: [], allStations: [], orbitalStations: [], status: 'loading' });
     const sys = encodeURIComponent(caseData.system);
 
     Promise.all([
@@ -130,15 +136,14 @@ export function RatCaseDetail({ caseData, isClosed = false, onClose }: RatCaseDe
         .map(s => ({ ...s, isLPad: isLPad(s.type) }))
         .sort((a, b) => a.name.localeCompare(b.name));
 
-      const lStations = stations.filter(s => isLPad(s.type));
-      const smStations = stations.filter(s => !isLPad(s.type));
-      const nearestL = lStations.reduce<typeof stations[0] | undefined>((a, b) => !a || b.distanceToArrival < a.distanceToArrival ? b : a, undefined);
-      const nearestSm = smStations.reduce<typeof stations[0] | undefined>((a, b) => !a || b.distanceToArrival < a.distanceToArrival ? b : a, undefined);
+      const orbitalStations: EdsmStation[] = stations
+        .filter(s => !isPlanetary(s.type))
+        .map(s => ({ ...s, isLPad: isLPad(s.type) }))
+        .sort((a, b) => a.distanceToArrival - b.distanceToArrival);
 
       setRatData({
         scoopable,
-        nearestLStation: nearestL,
-        nearestSmStation: nearestSm && (!nearestL || nearestSm.distanceToArrival < nearestL.distanceToArrival) ? nearestSm : undefined,
+        orbitalStations,
         allStations,
         bodies: bodyData?.bodies ?? [],
         status: 'done',
@@ -415,23 +420,22 @@ export function RatCaseDetail({ caseData, isClosed = false, onClose }: RatCaseDe
                 </section>
 
                 <section>
-                  <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Nearest Station</h3>
-                  <div className="bg-slate-900/60 border border-slate-700/60 rounded-lg p-3 space-y-2">
-                    {ratData.nearestLStation && (
-                      <div className="text-sm flex items-center gap-2">
-                        <span className="text-slate-500 font-mono text-xs w-6">L</span>
-                        <span className="text-slate-200 flex-1">{ratData.nearestLStation.name}</span>
-                        <span className="text-slate-500 font-mono text-xs">{formatLs(ratData.nearestLStation.distanceToArrival)}</span>
-                      </div>
+                  <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
+                    Stations{ratData.orbitalStations.length > 0 && (
+                      <span className="text-slate-600 normal-case"> ({ratData.orbitalStations.length})</span>
                     )}
-                    {ratData.nearestSmStation && (
-                      <div className="text-sm flex items-center gap-2">
-                        <span className="text-slate-500 font-mono text-xs w-6">S/M</span>
-                        <span className="text-slate-200 flex-1">{ratData.nearestSmStation.name}</span>
-                        <span className="text-slate-500 font-mono text-xs">{formatLs(ratData.nearestSmStation.distanceToArrival)}</span>
+                  </h3>
+                  {/* Capped height because a busy system can have a dozen of these,
+                      and this sits beside the star panel in a two-column row. */}
+                  <div className="bg-slate-900/60 border border-slate-700/60 rounded-lg p-3 space-y-2 max-h-40 overflow-y-auto">
+                    {ratData.orbitalStations.map((s) => (
+                      <div key={s.name} className="text-sm flex items-center gap-2">
+                        <span className="text-slate-500 font-mono text-xs w-6">{s.isLPad ? 'L' : 'S/M'}</span>
+                        <span className="text-slate-200 flex-1">{s.name}</span>
+                        <span className="text-slate-500 font-mono text-xs">{formatLs(s.distanceToArrival)}</span>
                       </div>
-                    )}
-                    {!ratData.nearestLStation && !ratData.nearestSmStation && (
+                    ))}
+                    {ratData.orbitalStations.length === 0 && (
                       <span className="text-sm text-slate-600">None found in system</span>
                     )}
                   </div>

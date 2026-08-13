@@ -225,23 +225,22 @@ export function EdsmCasePage() {
                 </section>
 
                 <section>
-                  <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Nearest Station</h3>
-                  <div className="bg-slate-900/60 border border-slate-700/60 rounded-lg p-3 space-y-2">
-                    {data.nearestLStation && (
-                      <div className="text-sm flex items-center gap-2">
-                        <span className="text-slate-500 font-mono text-xs w-6">L</span>
-                        <span className="text-slate-200 flex-1">{data.nearestLStation.name}</span>
-                        <span className="text-slate-500 font-mono text-xs">{formatLs(data.nearestLStation.distanceToArrival)}</span>
-                      </div>
+                  <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
+                    Stations{data.orbitalStations.length > 0 && (
+                      <span className="text-slate-600 normal-case"> ({data.orbitalStations.length})</span>
                     )}
-                    {data.nearestSmStation && (
-                      <div className="text-sm flex items-center gap-2">
-                        <span className="text-slate-500 font-mono text-xs w-6">S/M</span>
-                        <span className="text-slate-200 flex-1">{data.nearestSmStation.name}</span>
-                        <span className="text-slate-500 font-mono text-xs">{formatLs(data.nearestSmStation.distanceToArrival)}</span>
+                  </h3>
+                  {/* Capped height because a busy system can have a dozen of these,
+                      and this sits beside the star panel in a two-column row. */}
+                  <div className="bg-slate-900/60 border border-slate-700/60 rounded-lg p-3 space-y-2 max-h-40 overflow-y-auto">
+                    {data.orbitalStations.map((s) => (
+                      <div key={s.name} className="text-sm flex items-center gap-2">
+                        <span className="text-slate-500 font-mono text-xs w-6">{s.isLPad ? 'L' : 'S/M'}</span>
+                        <span className="text-slate-200 flex-1">{s.name}</span>
+                        <span className="text-slate-500 font-mono text-xs">{formatLs(s.distanceToArrival)}</span>
                       </div>
-                    )}
-                    {!data.nearestLStation && !data.nearestSmStation && (
+                    ))}
+                    {data.orbitalStations.length === 0 && (
                       <span className="text-sm text-slate-600">None found in system</span>
                     )}
                   </div>

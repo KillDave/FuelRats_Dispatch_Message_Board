@@ -27,8 +27,13 @@ export interface NearestScoopableStar {
 
 export interface EdsmSystemData {
   scoopable?: boolean;
-  nearestLStation?: EdsmStationRef;
-  nearestSmStation?: EdsmStationRef;
+  /**
+   * Everywhere in the system a ship can dock without landing, nearest first.
+   *
+   * This is the answer to "where do I send the client", so it deliberately
+   * excludes surface ports. allStations below is still the complete list.
+   */
+  orbitalStations: EdsmStation[];
   allStations: EdsmStation[];
   bodies: EdsmBody[];
   nearestScoopableStar?: NearestScoopableStar;
@@ -36,6 +41,20 @@ export interface EdsmSystemData {
 
 const isFC = (t: string) => t === 'Fleet Carrier';
 const isLPad = (t: string) => !['Outpost', 'Planetary Outpost'].includes(t);
+
+/**
+ * Anything sitting on a planet rather than in orbit.
+ *
+ * Covers Planetary Outpost, Planetary Port, Planetary Settlement, Planetary
+ * Engineer Base and Odyssey Settlement -- EDSM spells these several ways and
+ * adds more over time, so this matches on the words rather than listing types.
+ *
+ * These are excluded from the nearest-station picks because a client who needs
+ * a station needs somewhere they can dock without landing. A settlement 73ls
+ * away is not a useful answer when it means putting a ship on a surface. The
+ * full station list further down the window still shows them.
+ */
+const isPlanetary = (t: string) => /planetary|settlement/i.test(t);
 
 export function edsmSystemUrl(system: string): string {
   return `https://www.edsm.net/en/system?systemName=${encodeURIComponent(system)}`;
@@ -91,24 +110,16 @@ export async function fetchEdsmSystemData(system: string, signal?: AbortSignal):
     .map((s) => ({ ...s, isLPad: isLPad(s.type) }))
     .sort((a, b) => a.name.localeCompare(b.name));
 
-  const lStations = stations.filter((s) => isLPad(s.type));
-  const smStations = stations.filter((s) => !isLPad(s.type));
-  const nearestL = lStations.reduce<EdsmStationRef | undefined>(
-    (a, b) => (!a || b.distanceToArrival < a.distanceToArrival ? b : a),
-    undefined
-  );
-  const nearestSm = smStations.reduce<EdsmStationRef | undefined>(
-    (a, b) => (!a || b.distanceToArrival < a.distanceToArrival ? b : a),
-    undefined
-  );
+  const orbitalStations: EdsmStation[] = stations
+    .filter((s) => !isPlanetary(s.type))
+    .map((s) => ({ ...s, isLPad: isLPad(s.type) }))
+    .sort((a, b) => a.distanceToArrival - b.distanceToArrival);
 
   const nearestScoopableStar = scoopable === false ? await fetchNearestScoopableStar(system, signal) : undefined;
 
   return {
     scoopable,
-    nearestLStation: nearestL,
-    nearestSmStation:
-      nearestSm && (!nearestL || nearestSm.distanceToArrival < nearestL.distanceToArrival) ? nearestSm : undefined,
+    orbitalStations,
     allStations,
     bodies: bodyData?.bodies ?? [],
     nearestScoopableStar,

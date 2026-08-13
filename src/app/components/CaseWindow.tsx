@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import disconnectIcon from './image/Disconnect_Icon.png';
-import { CodeRedTimerBadge, type Case, type CaseStatus } from './DispatchBoard';
+import { CodeRedTimerBadge, isLPadStation, type Case, type CaseStatus } from './DispatchBoard';
 import { CopyableSystem } from './CopyableSystem';
 import { CaseNotes } from './CaseNotes';
 import { ClientHistory } from './CaseHistory';
@@ -731,7 +731,7 @@ export function CaseWindow({
                   )}
                 </div>
               )}
-              {(caseData.nearestLStation || caseData.nearestSmStation) && (
+              {caseData.stationOptions && caseData.stationOptions.length > 0 && (
                 <div
                   className="relative"
                   onMouseEnter={() => {
@@ -746,45 +746,33 @@ export function CaseWindow({
                     Station
                   </div>
                   {stationHover && (
-                    <div ref={stationPopupRef} style={{ left: stationPopupOffset }} className="absolute bottom-full mb-1 z-50 bg-slate-900 border border-slate-600 rounded shadow-xl p-1 min-w-max">
-                      {caseData.nearestSmStation && (
-                        <button
-                          className="flex items-center gap-2 w-full text-left px-2 py-1 rounded hover:bg-slate-700/50 text-xs"
-                          onClick={() => {
-                            const sm = caseData.nearestSmStation!;
-                            const text = sm.systemName
-                              ? `${sm.name} in ${sm.systemName} (${sm.systemDistance?.toFixed(1)}ly)`
-                              : `${sm.name} (${Math.round(sm.distanceToArrival).toLocaleString()}ls)`;
-                            navigator.clipboard.writeText(text);
-                          }}
-                        >
-                          <span className="text-slate-400 font-mono w-7 flex-shrink-0">S/M</span>
-                          <span className="text-slate-300">
-                            {caseData.nearestSmStation.systemName
-                              ? `${caseData.nearestSmStation.name} in ${caseData.nearestSmStation.systemName} (${caseData.nearestSmStation.systemDistance?.toFixed(1)}ly)`
-                              : `${caseData.nearestSmStation.name} (${Math.round(caseData.nearestSmStation.distanceToArrival).toLocaleString()}ls)`}
-                          </span>
-                        </button>
-                      )}
-                      {caseData.nearestLStation && (
-                        <button
-                          className="flex items-center gap-2 w-full text-left px-2 py-1 rounded hover:bg-slate-700/50 text-xs"
-                          onClick={() => {
-                            const l = caseData.nearestLStation!;
-                            const text = l.systemName
-                              ? `${l.name} in ${l.systemName} (${l.systemDistance?.toFixed(1)}ly)`
-                              : `${l.name} (${Math.round(l.distanceToArrival).toLocaleString()}ls)`;
-                            navigator.clipboard.writeText(text);
-                          }}
-                        >
-                          <span className="text-slate-400 font-mono w-7 flex-shrink-0">L</span>
-                          <span className="text-slate-300">
-                            {caseData.nearestLStation.systemName
-                              ? `${caseData.nearestLStation.name} in ${caseData.nearestLStation.systemName} (${caseData.nearestLStation.systemDistance?.toFixed(1)}ly)`
-                              : `${caseData.nearestLStation.name} (${Math.round(caseData.nearestLStation.distanceToArrival).toLocaleString()}ls)`}
-                          </span>
-                        </button>
-                      )}
+                    <div
+                      ref={stationPopupRef}
+                      style={{ left: stationPopupOffset }}
+                      /* Capped so a busy system cannot run the list off the top
+                         of the window; it scrolls instead. */
+                      className="absolute bottom-full mb-1 z-50 bg-slate-900 border border-slate-600 rounded shadow-xl p-1 min-w-max max-h-64 overflow-y-auto"
+                    >
+                      {caseData.stationOptions.map((s) => {
+                        // Out-of-system results are the sphere-search fallback, so
+                        // the useful number is how far the detour is, not how far
+                        // in-system the pad sits.
+                        const label = s.systemName
+                          ? `${s.name} in ${s.systemName} (${s.systemDistance?.toFixed(1)}ly)`
+                          : `${s.name} (${Math.round(s.distanceToArrival).toLocaleString()}ls)`;
+                        return (
+                          <button
+                            key={`${s.systemName ?? ''}/${s.name}`}
+                            className="flex items-center gap-2 w-full text-left px-2 py-1 rounded hover:bg-slate-700/50 text-xs"
+                            onClick={() => navigator.clipboard.writeText(label)}
+                          >
+                            <span className="text-slate-400 font-mono w-7 flex-shrink-0">
+                              {isLPadStation(s.type) ? 'L' : 'S/M'}
+                            </span>
+                            <span className="text-slate-300">{label}</span>
+                          </button>
+                        );
+                      })}
                     </div>
                   )}
                 </div>

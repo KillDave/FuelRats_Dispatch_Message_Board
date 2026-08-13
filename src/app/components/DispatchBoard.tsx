@@ -243,8 +243,17 @@ export interface Case {
   scoopable?: boolean;
   nearestScoopableStar?: { name: string; distance: number };
   scDistance?: { ls: number; timestamp: Date };
-  nearestLStation?: { name: string; distanceToArrival: number; type: string; systemName?: string; systemDistance?: number };
-  nearestSmStation?: { name: string; distanceToArrival: number; type: string; systemName?: string; systemDistance?: number };
+  /**
+   * Everywhere in the rescue system a ship can dock without landing, nearest
+   * first. Surface ports are left out: a client who needs a station needs
+   * somewhere to dock, not somewhere to land.
+   *
+   * When the system has nothing suitable, this falls back to the nearest large
+   * pad -- and, if the system has no stations at all, the nearest small/medium
+   * -- from a populated system within 50ly. Those entries carry systemName and
+   * systemDistance and are listed after the in-system ones.
+   */
+  stationOptions?: { name: string; distanceToArrival: number; type: string; systemName?: string; systemDistance?: number }[];
   ratProgress?: Record<string, {
     fr?: '+' | '-';
     wr?: '+' | '-';
@@ -290,12 +299,47 @@ export function compareCases(a: Case, b: Case): number {
   return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
 }
 
-const isLPadStation = (type: string) => !['Outpost', 'Planetary Outpost'].includes(type);
+export const isLPadStation = (type: string) => !['Outpost', 'Planetary Outpost'].includes(type);
 const isFleetCarrier = (type: string) => type === 'Fleet Carrier';
+/**
+ * Sits on a planet rather than in orbit -- Planetary Outpost/Port/Settlement,
+ * Planetary Engineer Base, Odyssey Settlement. Matched on the words because
+ * EDSM spells these several ways and keeps adding more.
+ *
+ * Excluded from the station suggestion: a client who needs a station needs
+ * somewhere to dock without putting a ship on a surface.
+ */
+const isPlanetaryStation = (type: string) => /planetary|settlement/i.test(type);
 const isColonizationStation = (type: string) =>
   type.toLowerCase().includes('colonisation') || type.toLowerCase().includes('construction');
 const canSeeColonization = (platform: string) =>
   platform.includes('Odyssey') || platform.includes('Horizons');
+
+/**
+ * The O2 countdown a case starts life with, read straight from its grabbed
+ * quotes.
+ *
+ * The merge path below only derives a timer when there is an existing case to
+ * merge against, so a case had no badge until something else happened on it --
+ * which on a refresh, or when opening the board mid-case, could be a long wait
+ * for a number that was already sitting in the quotes.
+ *
+ * Starts paused, matching what the merge path does when there is no prior
+ * timer. Whether a rat is actually with the client is IRC-derived, and at this
+ * point there is no IRC history to replay; it starts ticking on the next
+ * wr+/bc+/open.
+ */
+function initialCodeRedTimer(c: Case): Case['codeRedTimer'] {
+  const grab = findLatestGrabDuration(c.injections, c.clientName, c.ircNick);
+  if (!grab) return undefined;
+  return {
+    baseSeconds: grab.seconds,
+    lastSeenGrabInjectionId: grab.injectionId,
+    manualOverride: false,
+    running: false,
+    accumulatedSeconds: 0,
+  };
+}
 
 const RESCUE_DEFAULT: QuickMessageGroup = { label: 'RESCUE', messages: rescueMessages };
 /**
@@ -686,7 +730,7 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
             if (existingCase.apiId && fetchedCase.apiId && existingCase.apiId !== fetchedCase.apiId) {
               newCaseIds.push(fetchedCase.id);
               seenCaseIdsRef.current.add(fetchedCase.id);
-              return fetchedCase;
+              return { ...fetchedCase, codeRedTimer: initialCodeRedTimer(fetchedCase) };
             }
 
             // Merge messages: keep existing + add any new ones from API
@@ -733,8 +777,7 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
               scoopable: existingCase.scoopable,
               nearestScoopableStar: existingCase.nearestScoopableStar,
               scDistance: existingCase.scDistance,
-              nearestLStation: existingCase.nearestLStation,
-              nearestSmStation: existingCase.nearestSmStation,
+              stationOptions: existingCase.stationOptions,
               ratProgress: existingCase.ratProgress,
               jumpCalls: existingCase.jumpCalls,
               codeRedTimer,
@@ -742,10 +785,12 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
               ratIrcNicks: { ...fetchedCase.ratIrcNicks, ...existingCase.ratIrcNicks },
             };
           }
-          
-          return fetchedCase;
+
+          // First time we have seen this case -- including every case on the
+          // very first poll after a load or refresh.
+          return { ...fetchedCase, codeRedTimer: initialCodeRedTimer(fetchedCase) };
         });
-        
+
         // Auto-toggle all new cases to make them visible
         if (newCaseIds.length > 0) {
           setToggledCaseIds((prev) => {
@@ -857,18 +902,21 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
         .then(async (data) => {
           const rawStations: { name: string; distanceToArrival: number; type: string }[] = data?.stations ?? [];
           const stations = rawStations.filter(s =>
-            !isFleetCarrier(s.type) && (showColonization || !isColonizationStation(s.type))
+            !isFleetCarrier(s.type)
+            && !isPlanetaryStation(s.type)
+            && (showColonization || !isColonizationStation(s.type))
           );
 
-          const lStations = stations.filter(s => isLPadStation(s.type));
-          const smOnlyStations = stations.filter(s => !isLPadStation(s.type));
+          // Everything dockable in the rescue system itself, nearest first.
+          const inSystem: StationData[] = [...stations]
+            .sort((a, b) => a.distanceToArrival - b.distanceToArrival);
 
-          let nearestL: StationData | null = lStations.length > 0
-            ? lStations.reduce((a, b) => a.distanceToArrival <= b.distanceToArrival ? a : b)
-            : null;
-          let nearestSm: StationData | null = smOnlyStations.length > 0
-            ? smOnlyStations.reduce((a, b) => a.distanceToArrival <= b.distanceToArrival ? a : b)
-            : null;
+          // Only used to decide whether the sphere search is needed, and to
+          // collect what it finds. Anything from a nearby system is appended
+          // after the in-system list, tagged with the system it is in.
+          let nearestL: StationData | null = inSystem.find(s => isLPadStation(s.type)) ?? null;
+          let nearestSm: StationData | null = inSystem.find(s => !isLPadStation(s.type)) ?? null;
+          const fromNearbySystems: StationData[] = [];
 
           const needLSphere = !nearestL;
           // Only search sphere for SM if there are no stations in system at all
@@ -894,7 +942,9 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
               const stnData = await stnRes.json();
               const nearbyRaw: { name: string; distanceToArrival: number; type: string }[] = stnData?.stations ?? [];
               const nearbyStations = nearbyRaw.filter(s =>
-                !isFleetCarrier(s.type) && (showColonization || !isColonizationStation(s.type))
+                !isFleetCarrier(s.type)
+                && !isPlanetaryStation(s.type)
+                && (showColonization || !isColonizationStation(s.type))
               );
 
               if (needLSphere && !nearestL) {
@@ -902,6 +952,7 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
                 if (nearbyL.length > 0) {
                   const best = nearbyL.reduce((a, b) => a.distanceToArrival <= b.distanceToArrival ? a : b);
                   nearestL = { ...best, systemName: candidate.name, systemDistance: candidate.distance };
+                  fromNearbySystems.push(nearestL);
                 }
               }
 
@@ -910,27 +961,23 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
                 if (nearbySm.length > 0) {
                   const best = nearbySm.reduce((a, b) => a.distanceToArrival <= b.distanceToArrival ? a : b);
                   nearestSm = { ...best, systemName: candidate.name, systemDistance: candidate.distance };
+                  fromNearbySystems.push(nearestSm);
                 }
               }
             }
           }
 
-          // Only show SM if it's genuinely closer than L — L stations serve all ship sizes
-          const smIsCloser = !!nearestSm && (
-            !nearestL ||
-            (!nearestSm.systemName && !nearestL.systemName && nearestSm.distanceToArrival < nearestL.distanceToArrival) ||
-            (!nearestSm.systemName && !!nearestL.systemName) ||
-            (!!nearestSm.systemName && !!nearestL.systemName && nearestSm.systemDistance! < nearestL.systemDistance!)
-          );
+          // In-system first, then anything the sphere search had to go and find,
+          // ordered by how far out of the way that system is.
+          const stationOptions: StationData[] = [
+            ...inSystem,
+            ...fromNearbySystems.sort((a, b) => (a.systemDistance ?? 0) - (b.systemDistance ?? 0)),
+          ];
 
           setCases((prev) =>
             prev.map((pc) =>
               pc.id === c.id && pc.system === system
-                ? {
-                    ...pc,
-                    nearestLStation: nearestL ?? undefined,
-                    nearestSmStation: smIsCloser ? nearestSm! : undefined,
-                  }
+                ? { ...pc, stationOptions }
                 : pc
             )
           );
