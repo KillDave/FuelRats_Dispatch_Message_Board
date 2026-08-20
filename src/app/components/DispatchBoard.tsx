@@ -1178,10 +1178,14 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
             : c.messages.some((msg) => !msg.isSystem && msg.sender.toLowerCase() === effectiveNickLower)
         );
 
-        const isForThisCase =
-          (ircMsg.caseId && c.id === ircMsg.caseId) ||
-          (ircMsg.channel === '#fuelrats' && (exactNickMatch || fuzzyMatch || isAssignedRat || hasRecentMessage)) ||
-          (isPrivateNotice && (exactNickMatch || fuzzyMatch || isAssignedRat || hasRecentMessage));
+        // An explicit case number in the message (e.g. "#5") pins it to that
+        // case only - it must not also fall through to nick-based matching,
+        // which would otherwise duplicate it onto whatever case the sender
+        // happens to be assigned to right now.
+        const isForThisCase = ircMsg.caseId
+          ? c.id === ircMsg.caseId
+          : (ircMsg.channel === '#fuelrats' && (exactNickMatch || fuzzyMatch || isAssignedRat || hasRecentMessage)) ||
+            (isPrivateNotice && (exactNickMatch || fuzzyMatch || isAssignedRat || hasRecentMessage));
 
         if (!isForThisCase) return c;
 
