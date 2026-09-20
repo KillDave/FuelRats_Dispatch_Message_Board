@@ -1,5 +1,9 @@
 ## Changelog
 
+### v2.0.10
+- Added a Board Options page. New Case Alerts, Alert On Platform, Message Colors, DeepL Settings, and Langbly Settings moved out of the header dropdown into one place, so the menu no longer lists five separate settings entries
+- Added an auto-expand-quotes option. Off by default, it controls whether the live case's Quotes panel and a past rescue's case log open collapsed or expanded
+
 ### v2.0.9
 - The O2 countdown now shows in rat mode. It existed only on the dispatcher side -- the case window and the sidebar list -- and rat mode swaps the whole main area for RatBoard, which never rendered it, so the one number telling a rat how hard to push was the one number they could not see. It sits beside the CODE RED marker in both views, where the urgency already is. Read-only there: correcting a grab the parser read wrong belongs with dispatch, who can see the quote it came from. Nothing new appears on ordinary cases
 - Station suggestions no longer offer surface ports. A settlement 73ls away is not a useful answer to "where do I send the client" when it means putting a ship on a surface, and in a system like HIP 101597 they crowded out the real stations forty to nine. Anything on a planet is now excluded -- matched on the words rather than a list of types, because EDSM spells these several ways and keeps adding more, so a hardcoded list would quietly start leaking again the next time Frontier ships a new surface type. The full "Stations in System" list is untouched and still shows everything
