@@ -129,6 +129,14 @@ jobs:
         run: |
           set -euo pipefail
 
+          # actions/checkout's own targeted fetch (to check out this exact ref)
+          # re-points the local tag ref straight at the commit, discarding the
+          # annotated tag object an earlier fetch in the same step correctly
+          # collected -- so the "is this annotated" check below would otherwise
+          # always see a commit and wrongly call every tag lightweight. Force a
+          # fresh fetch of just this ref to get the real tag object back.
+          git fetch --force origin "refs/tags/$TAG:refs/tags/$TAG"
+
           # Drafts are invisible to /releases/tags/{tag}, so the list endpoint
           # is the only way to find one by tag name. jq reads the tag out of the
           # environment rather than having the shell interpolate it, which keeps
