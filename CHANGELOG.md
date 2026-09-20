@@ -1,6 +1,6 @@
 ## Changelog
 
-### Unreleased
+### v2.0.10
 - Added a Board Options page. New Case Alerts, Alert On Platform, Message Colors, DeepL Settings, and Langbly Settings moved out of the header dropdown into one place, so the menu no longer lists five separate settings entries
 - Added an auto-expand-quotes option. Off by default, it controls whether the live case's Quotes panel and a past rescue's case log open collapsed or expanded
 
