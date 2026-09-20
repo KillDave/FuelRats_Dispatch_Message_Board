@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { ChevronDown, ChevronRight, History, AlertTriangle, Loader2, ExternalLink } from 'lucide-react';
 import { fuelRatsApi } from '@/app/services/fuelRatsApi';
 import type { HistoryRescue, RescueSearchResult } from '@/app/services/fuelRatsApi';
+import { getAutoExpandQuotes } from '@/app/services/boardOptionsService';
 
 /**
  * Past rescues, for the panel on a live case and for the search page.
@@ -40,6 +41,7 @@ function outcomeLabel(rescue: HistoryRescue): string {
 /** One past rescue, with everything the API returned behind a toggle. */
 export function RescueRow({ rescue }: { rescue: HistoryRescue }) {
   const [open, setOpen] = useState(false);
+  const [logOpen, setLogOpen] = useState(() => getAutoExpandQuotes());
 
   return (
     <div className="border border-slate-700/70 rounded bg-slate-900/50">
@@ -134,7 +136,7 @@ export function RescueRow({ rescue }: { rescue: HistoryRescue }) {
           </Field>
 
           {rescue.quotes.length > 0 && (
-            <details className="mt-1">
+            <details className="mt-1" open={logOpen} onToggle={(e) => setLogOpen(e.currentTarget.open)}>
               <summary className="text-[11px] text-slate-400 cursor-pointer hover:text-slate-200">
                 Case log — {rescue.quotes.length}{' '}
                 {rescue.quotes.length === 1 ? 'entry' : 'entries'}

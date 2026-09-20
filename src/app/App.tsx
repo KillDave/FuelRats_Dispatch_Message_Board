@@ -3,6 +3,7 @@ import { DispatchBoard } from '@/app/components/DispatchBoard';
 import { LoginScreen } from '@/app/components/LoginScreen';
 import { DeepLTestPage } from '@/app/components/DeepLTestPage';
 import { ColorSettingsPage } from '@/app/components/ColorSettingsPage';
+import { BoardOptionsPage } from '@/app/components/BoardOptionsPage';
 import { EdsmCasePage } from '@/app/components/EdsmCasePage';
 import { LangblyTestPage } from '@/app/components/LangblyTestPage';
 import { ClientTestPage } from '@/app/components/ClientTestPage';
@@ -72,6 +73,14 @@ export default function App() {
     return (
       <div className="h-[100dvh] flex flex-col">
         <EdsmCasePage />
+      </div>
+    );
+  }
+
+  if (hash === '#options') {
+    return (
+      <div className="h-[100dvh] flex flex-col">
+        <BoardOptionsPage onBack={() => { window.location.hash = ''; setHash(''); }} />
       </div>
     );
   }

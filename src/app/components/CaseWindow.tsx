@@ -12,6 +12,7 @@ import {
   classifyMessageRole,
 } from '../services/colorSettingsService';
 import { openEdsmPopout } from '../services/edsmPopout';
+import { getAutoExpandQuotes } from '../services/boardOptionsService';
 import { Button } from '@/app/components/ui/button';
 import { Input } from '@/app/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/app/components/ui/popover';
@@ -121,7 +122,7 @@ export function CaseWindow({
   const [gravityMode, setGravityMode] = useState<'off' | 'grav' | 'nosco'>('off');
   // Open by default: the notes are the point of taking them, and a case rarely
   // has more than a handful.
-  const [notesCollapsed, setNotesCollapsed] = useState(false);
+  const [notesCollapsed, setNotesCollapsed] = useState(() => !getAutoExpandQuotes());
   const [shipHover, setShipHover] = useState(false);
   const [shipPopupOffset, setShipPopupOffset] = useState(0);
   const shipHideTimer = useRef<number | null>(null);

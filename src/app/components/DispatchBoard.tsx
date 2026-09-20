@@ -5,12 +5,8 @@ import { MessageEditorPage } from './MessageEditorPage';
 import { CopyableSystem } from './CopyableSystem';
 import { UpdateBadge } from './UpdateBadge';
 import { Button } from '@/app/components/ui/button';
-import { Eye, EyeOff, Sidebar, User, MapPin, AlertTriangle, Clock, LogOut, Plus, Shield, ChevronDown, MessageSquare, Settings, Bell, Search, Palette } from 'lucide-react';
-import {
-  ALERT_PLATFORMS, alertNewCase, desktopPermission, loadAlertSettings,
-  requestDesktopPermission, saveAlertSettings, testAlert,
-  type AlertSettings,
-} from '../services/alertService';
+import { Eye, EyeOff, Sidebar, User, MapPin, AlertTriangle, Clock, LogOut, Plus, Shield, ChevronDown, MessageSquare, Settings, Search } from 'lucide-react';
+import { alertNewCase, loadAlertSettings, type AlertSettings } from '../services/alertService';
 import { fuelRatsApi, apiDebug } from '../services/fuelRatsApi';
 import { ircWebSocket, IRCMessage, IRCConnectionStatus } from '../services/ircWebSocket';
 import { IRCConnectionPanel } from './IRCConnectionPanel';
@@ -426,116 +422,16 @@ function loadButtonGroups(): QuickMessageGroup[] {
   return DEFAULT_BUTTON_GROUPS;
 }
 
-/** Checkbox row used by the alert settings below. */
-function AlertToggle({
-  label,
-  checked,
-  onChange,
-  hint,
-}: {
-  label: string;
-  checked: boolean;
-  onChange: (next: boolean) => void;
-  hint?: string;
-}) {
-  return (
-    <label className="flex items-center gap-2 px-3 py-1 text-xs text-slate-300 hover:bg-slate-700/50 rounded cursor-pointer">
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={e => onChange(e.target.checked)}
-        className="accent-orange-500"
-      />
-      <span className="flex-1">{label}</span>
-      {hint && <span className="text-slate-600">{hint}</span>}
-    </label>
-  );
-}
-
-function AlertSettingsMenu({
-  settings,
-  onChange,
-}: {
-  settings: AlertSettings;
-  onChange: (next: AlertSettings) => void;
-}) {
-  const [permission, setPermission] = React.useState(desktopPermission());
-
-  const setDesktop = async (on: boolean) => {
-    // Asked for at the moment it is switched on: a permission prompt on page
-    // load, before anyone has asked for notifications, gets dismissed reflexively
-    // and Chrome then refuses to ask again.
-    if (on) {
-      const granted = await requestDesktopPermission();
-      setPermission(desktopPermission());
-      if (!granted) return; // leave the toggle off rather than lie about it
-    }
-    onChange({ ...settings, desktop: on });
-  };
-
-  return (
-    <>
-      <div className="px-3 pt-1.5 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-        New case alerts
-      </div>
-      <AlertToggle
-        label="Windows notification"
-        checked={settings.desktop}
-        onChange={on => void setDesktop(on)}
-        hint={
-          permission === 'unsupported' ? 'n/a'
-          : permission === 'denied'    ? 'blocked'
-          : undefined
-        }
-      />
-      {permission === 'denied' && (
-        <p className="px-3 pb-1 text-[10px] text-slate-600 leading-snug max-w-56">
-          Blocked for this site — allow notifications in the browser's address-bar
-          site settings, then re-enable here.
-        </p>
-      )}
-      <AlertToggle
-        label="Sound"
-        checked={settings.sound}
-        onChange={on => onChange({ ...settings, sound: on })}
-      />
-      <div className="px-3 pt-1.5 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-        Alert on platform
-      </div>
-      {ALERT_PLATFORMS.map(({ key, label }) => (
-        <AlertToggle
-          key={key}
-          label={label}
-          checked={settings.platforms[key]}
-          onChange={on => onChange({ ...settings, platforms: { ...settings.platforms, [key]: on } })}
-        />
-      ))}
-      <button
-        onClick={() => testAlert(settings)}
-        disabled={!settings.desktop && !settings.sound}
-        className="flex items-center gap-2 w-full text-left px-3 py-1.5 rounded text-xs text-slate-300 hover:bg-slate-700/50 disabled:text-slate-600 disabled:hover:bg-transparent transition-colors"
-      >
-        <Bell className="w-3 h-3" />
-        Test alert
-      </button>
-    </>
-  );
-}
-
 function HeaderMenu({
   view,
   onSetView,
   onAddCase,
   onLogout,
-  alertSettings,
-  onAlertSettingsChange,
 }: {
   view: string;
   onSetView: (v: 'board' | 'rat' | 'editor') => void;
   onAddCase: () => void;
   onLogout?: () => void;
-  alertSettings: AlertSettings;
-  onAlertSettingsChange: (next: AlertSettings) => void;
 }) {
   const [open, setOpen] = React.useState(false);
   const ref = React.useRef<HTMLDivElement>(null);
@@ -581,8 +477,6 @@ function HeaderMenu({
             Add Case
           </button>
           <div className="my-1 border-t border-slate-700/60" />
-          <AlertSettingsMenu settings={alertSettings} onChange={onAlertSettingsChange} />
-          <div className="my-1 border-t border-slate-700/60" />
           <button
             onClick={() => { window.location.hash = '#search'; setOpen(false); }}
             className="flex items-center gap-2 w-full text-left px-3 py-1.5 rounded text-xs text-slate-300 hover:bg-slate-700/50 transition-colors"
@@ -590,27 +484,12 @@ function HeaderMenu({
             <Search className="w-3 h-3" />
             Case search
           </button>
-          <div className="my-1 border-t border-slate-700/60" />
           <button
-            onClick={() => { window.location.hash = '#colors'; setOpen(false); }}
-            className="flex items-center gap-2 w-full text-left px-3 py-1.5 rounded text-xs text-slate-300 hover:bg-slate-700/50 transition-colors"
-          >
-            <Palette className="w-3 h-3" />
-            Message Colors
-          </button>
-          <button
-            onClick={() => { window.location.hash = '#deepl'; setOpen(false); }}
+            onClick={() => { window.location.hash = '#options'; setOpen(false); }}
             className="flex items-center gap-2 w-full text-left px-3 py-1.5 rounded text-xs text-slate-300 hover:bg-slate-700/50 transition-colors"
           >
             <Settings className="w-3 h-3" />
-            DeepL Settings
-          </button>
-          <button
-            onClick={() => { window.location.hash = '#langbly'; setOpen(false); }}
-            className="flex items-center gap-2 w-full text-left px-3 py-1.5 rounded text-xs text-slate-300 hover:bg-slate-700/50 transition-colors"
-          >
-            <Settings className="w-3 h-3" />
-            Langbly Settings
+            Board Options
           </button>
           {onLogout && (
             <>
@@ -654,7 +533,7 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
   // Seeded from the samples that survived the last unmount, so returning from
   // the case search shows a figure immediately rather than after a minute.
   const [burnPerHour, setBurnPerHour] = useState<number | null>(null);
-  const [alertSettings, setAlertSettings] = useState<AlertSettings>(loadAlertSettings);
+  const [alertSettings] = useState<AlertSettings>(loadAlertSettings);
   /** Cases already alerted for, so a re-render or refetch cannot ping twice. */
   const alertedRef = useRef<Set<string>>(new Set());
   /**
@@ -1334,11 +1213,6 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
     }
   }, [cases, isLoadingApi, alertSettings]);
 
-  const updateAlertSettings = (next: AlertSettings) => {
-    setAlertSettings(next);
-    saveAlertSettings(next);
-  };
-
   const sortedCases = [...cases].sort(compareCases);
   const visibleCases = sortedCases.filter((c) => toggledCaseIds.has(c.id));
 
@@ -1535,8 +1409,6 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
               onSetView={setView}
               onAddCase={() => setShowAddCase(true)}
               onLogout={onLogout}
-              alertSettings={alertSettings}
-              onAlertSettingsChange={updateAlertSettings}
             />
           </div>
 

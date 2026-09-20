@@ -4,6 +4,7 @@ import { CodeRedTimerBadge, type Case } from './DispatchBoard';
 import { CopyableSystem } from './CopyableSystem';
 import { CaseNotes } from './CaseNotes';
 import { distanceToSeconds, formatCountdown, etaColor } from '../services/scTime';
+import { getAutoExpandQuotes } from '../services/boardOptionsService';
 
 interface EdsmBody {
   name: string;
@@ -100,7 +101,9 @@ function SectionHeader({
 export function RatCaseDetail({ caseData, isClosed = false, onClose }: RatCaseDetailProps) {
   const [elapsed, setElapsed] = useState(0);
   const [ratData, setRatData] = useState<RatData>({ bodies: [], allStations: [], orbitalStations: [], status: 'idle' });
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [collapsed, setCollapsed] = useState<Set<string>>(
+    () => (getAutoExpandQuotes() ? new Set() : new Set(['notes']))
+  );
   const [stationSort, setStationSort] = useState<'alpha' | 'distance'>('alpha');
   const toggleSection = (key: string) =>
     setCollapsed(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
