@@ -156,12 +156,17 @@ jobs:
               git tag -l --format='%(contents)' "$TAG" > tagmsg.txt
               TITLE="$(head -1 tagmsg.txt)"
               tail -n +2 tagmsg.txt > notes.md
-              gh release create "$TAG" --draft --title "$TITLE" --notes-file notes.md
+              REL_URL="$(gh release create "$TAG" --draft --title "$TITLE" --notes-file notes.md)"
             else
               echo "::notice::$TAG is a lightweight tag and carries no notes of its own. Generating them."
-              gh release create "$TAG" --draft --title "$TAG" --generate-notes
+              REL_URL="$(gh release create "$TAG" --draft --title "$TAG" --generate-notes)"
             fi
-            REL_ID="$(find_release)"
+            # Read the release straight back from the URL gh just printed,
+            # rather than re-searching the list endpoint for it: that list is
+            # occasionally a beat behind its own writes, and re-scanning it
+            # immediately after creating the thing it's supposed to find was
+            # coming back empty.
+            REL_ID="$(gh api "$REL_URL" --jq .id)"
             echo "created draft release $REL_ID"
           else
             echo "release $REL_ID already exists for $TAG - attaching assets, leaving its notes alone"
