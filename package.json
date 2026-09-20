@@ -1,7 +1,7 @@
 {
   "name": "@figma/my-make-file",
   "private": true,
-  "version": "2.0.10",
+  "version": "2.0.11",
   "repository": {
     "type": "git",
     "url": "https://github.com/KillDave/FuelRats_Dispatch_Message_Board.git"

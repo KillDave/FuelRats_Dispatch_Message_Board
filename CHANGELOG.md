@@ -1,5 +1,8 @@
 ## Changelog
 
+### v2.0.11
+- v2.0.10's tag was pushed before the release workflow's own bug was found: `actions/checkout`'s fetch to check out a tag ref re-points it at the plain commit, discarding the annotated tag object, so the workflow's "does this tag carry notes" check always saw a commit and never found any. Fixed in the workflow; no application changes since v2.0.10, whose entry below is what actually shipped
+
 ### v2.0.10
 - Added a Board Options page. New Case Alerts, Alert On Platform, Message Colors, DeepL Settings, and Langbly Settings moved out of the header dropdown into one place, so the menu no longer lists five separate settings entries
 - Added an auto-expand-quotes option. Off by default, it controls whether the live case's Quotes panel and a past rescue's case log open collapsed or expanded
