@@ -1,5 +1,10 @@
 ## Changelog
 
+### v2.0.11
+- Launching FRBoard while it is already running no longer flashes a socket error and vanishes. Windows words a taken port as "only one usage of each socket address", which the old check never matched, so the second copy printed a raw WinError 10048 and its console closed before it could be read. It now says FRBoard is already running, opens the board the running copy is serving, and says how to restart it
+- Startup errors stay on screen until you press Enter instead of closing the window with them
+- `proxy_port` in `bridge-config.json` is honoured -- the local proxy for translation, Spansh routes and the journal. A leftover hardcoded `8081` further down the bridge overrode whatever the config said
+
 ### v2.0.10
 - Added a Board Options page. New Case Alerts, Alert On Platform, Message Colors, DeepL Settings, and Langbly Settings moved out of the header dropdown into one place, so the menu no longer lists five separate settings entries
 - Added an auto-expand-quotes option. Off by default, it controls whether the live case's Quotes panel and a past rescue's case log open collapsed or expanded
