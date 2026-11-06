@@ -353,7 +353,6 @@ def _journal_commanders(max_files=60):
         return {'error': str(e)}
 
 
-PROXY_PORT = 8081
 CORS = (
     'Access-Control-Allow-Origin: *\r\n'
     'Access-Control-Allow-Headers: Authorization, Content-Type\r\n'
@@ -897,14 +896,87 @@ async def main():
             async with proxy_server:
                 await asyncio.Future()
     except OSError as e:
-        if "address already in use" in str(e).lower():
-            print(f"INFO Bridge already running on port {WS_PORT}, exiting.")
+        if _port_in_use(e):
+            _already_running(e)
         else:
             print(f"ERR {e}")
+            _hold_window()
         sys.exit(0)
     except Exception as e:
         print(f"ERR Fatal error: {e}")
         traceback.print_exc()
+        _hold_window()
+
+
+def _port_in_use(e):
+    """
+    Whether an OSError from bind means another process owns the port.
+
+    The text cannot be matched: Windows says "only one usage of each socket
+    address ... is normally permitted", not "address already in use", so the
+    old string check never fired there and a second launch printed a raw
+    WinError and vanished. errno is EADDRINUSE on POSIX; on Windows the
+    10048 lives in winerror, and asyncio's own wrapper keeps it in errno.
+    """
+    import errno
+    return (e.errno in (errno.EADDRINUSE, 10048)
+            or getattr(e, 'winerror', None) == 10048)
+
+
+def _port_open(port):
+    import socket
+    try:
+        with socket.create_connection(('127.0.0.1', port), timeout=1):
+            return True
+    except OSError:
+        return False
+
+
+def _already_running(e):
+    """
+    Another copy holds the ports -- almost always an earlier FRBoard.exe still
+    running, minimised or in a console tab that was forgotten about.
+
+    Starting a second one is pointless: the ports are taken and the browser
+    would talk to the old copy anyway. So point the user at the copy that
+    works, rather than dying with a socket error they cannot act on.
+    """
+    print()
+    # Which port is not worth guessing at: the proxy binds first, then the
+    # board (5173, which `npm run dev` also wants), then the WebSocket.
+    print("INFO A port FRBoard needs is already taken -- most likely FRBoard")
+    print("     is already running. (" + str(e).split(': ', 1)[0] + ")")
+    if _port_open(BOARD_PORT) and '--no-browser' not in sys.argv:
+        print(f"     Opening the running board: http://localhost:{BOARD_PORT}")
+        try:
+            webbrowser.open(f'http://localhost:{BOARD_PORT}')
+        except Exception:
+            pass
+    print("     To restart it, close the other FRBoard window first,")
+    print("     or end FRBoard.exe in Task Manager.")
+    _hold_window()
+
+
+def _hold_window():
+    """
+    Keep the console open long enough to read why we are exiting.
+
+    Double-clicking FRBoard.exe gives it a console of its own that closes the
+    instant the process ends, which turned every startup error into a flash
+    on screen. Only when there is a console to read from: launched by the
+    protocol handler or redirected, input() would raise, so fall back to a
+    short sleep.
+    """
+    if not getattr(sys, 'frozen', False):
+        return
+    try:
+        if sys.stdin and sys.stdin.isatty():
+            input("Press Enter to close...")
+            return
+    except (EOFError, OSError, RuntimeError):
+        pass
+    import time
+    time.sleep(8)
 
 if __name__ == "__main__":
     try:
