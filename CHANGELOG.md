@@ -1,5 +1,13 @@
 ## Changelog
 
+### v2.0.12
+- Security fixes across the IRC bridge, the AdiIRC script, the board and the installer. Updating is strongly recommended
+- The updated AdiIRC script is placed by the installer; say yes when AdiIRC asks to reload it
+- The bridge now only answers the board served by FRBoard.exe (or `npm run dev`). If you serve `dist/` yourself from another address, add it to `allowed_origins` in `bridge-config.json` -- see the README
+- The board shows a recovery screen instead of going blank if something goes wrong while it is running
+- Uninstalling only removes the files the installer created
+- Dependency updates with security fixes
+
 ### v2.0.11
 - Launching FRBoard while it is already running no longer flashes a socket error and vanishes. Windows words a taken port as "only one usage of each socket address", which the old check never matched, so the second copy printed a raw WinError 10048 and its console closed before it could be read. It now says FRBoard is already running, opens the board the running copy is serving, and says how to restart it
 - Startup errors stay on screen until you press Enter instead of closing the window with them
