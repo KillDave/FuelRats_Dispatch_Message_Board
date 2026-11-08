@@ -98,6 +98,9 @@ function hasInstallableAsset(body: unknown): boolean {
   const assets = (body as { assets?: unknown })?.assets;
   if (!Array.isArray(assets)) return false;
   const names = assets.map((a) => String((a as { name?: unknown })?.name ?? ''));
+  // The installer refuses a release it cannot verify, and the checksum file is
+  // uploaded last, so its presence also means every other file has arrived.
+  if (!names.includes('SHA256SUMS.txt')) return false;
   return names.includes('FRBoard.exe') || names.some((n) => n.startsWith('Dispatch_Board_'));
 }
 

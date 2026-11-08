@@ -81,6 +81,16 @@ Download **`FRBoard.exe`** from the release and run it. It serves the board *and
 bridges IRC, so there is nothing else to start — it opens
 `http://localhost:5173` in your browser by default (`--no-browser` to stop that).
 
+Every release carries a `SHA256SUMS.txt`. `FRBoard-Setup.exe` and the board's
+update button check each download against it and refuse anything that does
+not match. To check a file you downloaded by hand:
+
+```powershell
+(Get-FileHash .\FRBoard.exe -Algorithm SHA256).Hash.ToLower()
+```
+
+and compare it with that file's line in `SHA256SUMS.txt`.
+
 A console window stays open while it runs; keep it there while dispatching, as
 it prints the IRC connection state.
 

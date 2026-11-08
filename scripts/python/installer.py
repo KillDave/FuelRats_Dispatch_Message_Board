@@ -20,6 +20,7 @@ installed, on a machine that may have no packages and no working pip.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -253,6 +254,96 @@ def download(url: str, dest: Path) -> Path:
     with urllib.request.urlopen(req, timeout=120) as resp, dest.open("wb") as fh:
         shutil.copyfileobj(resp, fh)
     return dest
+
+
+# ---------------------------------------------------------------- checksums
+
+# Published with every release by scripts/release.ps1, in sha256sum's format:
+# "<hex digest>  <file name>" per line. Every file this installer downloads is
+# checked against it before it is used, and a release without it is refused.
+SUMS_NAME = "SHA256SUMS.txt"
+
+
+class ChecksumError(Exception):
+    pass
+
+
+def parse_sums(text: str) -> dict[str, str]:
+    sums = {}
+    for line in text.splitlines():
+        found = re.match(r"^([0-9a-fA-F]{64}) [ *](.+)$", line.strip())
+        if found:
+            sums[found.group(2).strip()] = found.group(1).lower()
+    return sums
+
+
+def sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def fetch_sums(assets: dict[str, str], tmpdir: Path) -> dict[str, str]:
+    """The release's checksums, or ChecksumError if it has none to give."""
+    if SUMS_NAME not in assets:
+        raise ChecksumError(f"the release has no {SUMS_NAME}, so its files cannot be verified")
+    sums = parse_sums(download(assets[SUMS_NAME], tmpdir / SUMS_NAME).read_text(encoding="utf-8"))
+    if not sums:
+        raise ChecksumError(f"{SUMS_NAME} lists no files")
+    return sums
+
+
+def verified_download(name: str, assets: dict[str, str], sums: dict[str, str], dest: Path) -> Path:
+    """Download a release file and refuse it unless it matches its checksum."""
+    expected = sums.get(name)
+    if expected is None:
+        raise ChecksumError(f"{name} is not listed in {SUMS_NAME}")
+    download(assets[name], dest)
+    actual = sha256_file(dest)
+    if actual != expected:
+        dest.unlink(missing_ok=True)
+        raise ChecksumError(f"{name} does not match its checksum (expected {expected}, got {actual})")
+    return dest
+
+
+def replace_setup(root: Path, new_setup: Path) -> None:
+    """
+    Put a verified FRBoard-Setup.exe beside the app.
+
+    The copy there is what the board's update button runs, so it has to move
+    forward with the rest of the app. If it is the very file running now,
+    Windows will not let it be overwritten but will let it be renamed, so it is
+    moved aside and removed on a later run.
+    """
+    target = root / SETUP_EXE
+    running = Path(sys.executable).resolve() if getattr(sys, "frozen", False) else None
+    if target.exists() and running is not None and target.resolve() == running:
+        old = target.with_name(SETUP_EXE + ".old")
+        old.unlink(missing_ok=True)
+        target.rename(old)
+    shutil.copy2(new_setup, target)
+
+
+def refresh_setup(root: Path) -> str:
+    """
+    Replace the installer beside FRBoard.exe with the latest release's, verified.
+
+    Called by FRBoard.exe just before it hands an update over, so the installer
+    doing the work is one that checks what it downloads -- even where the copy
+    already installed predates checksums. A release without checksums leaves the
+    existing installer in place, as before.
+    """
+    rel = latest_release()
+    assets = {a["name"]: a["browser_download_url"] for a in rel.get("assets", [])}
+    if SUMS_NAME not in assets or SETUP_EXE not in assets:
+        return "release has no checksums; using the installed updater"
+    with tempfile.TemporaryDirectory() as tmp:
+        tmpdir = Path(tmp)
+        sums = fetch_sums(assets, tmpdir)
+        replace_setup(root, verified_download(SETUP_EXE, assets, sums, tmpdir / SETUP_EXE))
+    return f"updater refreshed from {rel.get('tag_name', '?')}"
 
 
 def safe_extract(archive: Path, into: Path) -> None:
@@ -567,7 +658,7 @@ def finish_install(root: Path, version: str, desktop: bool) -> None:
 
 def installed_items(root: Path) -> list[Path]:
     """The files and folders an install or update writes into `root`."""
-    names = [BOARD_EXE, SETUP_EXE, "bridge.exe", STAMP, "dist", "installer.py"]
+    names = [BOARD_EXE, SETUP_EXE, SETUP_EXE + ".old", "bridge.exe", STAMP, "dist", "installer.py"]
     items = [root / n for n in names]
     items += list(root.glob("*.bat"))
     items += list(root.glob("*.exe.superseded"))
@@ -681,6 +772,13 @@ def cmd_update(root: Path, do_install: bool) -> int:
             print("  --update still works if you only want the board and the bridge.")
             return 1
 
+    # Left by replace_setup on an earlier run, when the installer being replaced
+    # was the one running. Nothing holds it any more.
+    try:
+        (root / (SETUP_EXE + ".old")).unlink(missing_ok=True)
+    except OSError:
+        pass
+
     try:
         rel = latest_release()
     except (urllib.error.URLError, OSError, ValueError) as err:
@@ -702,12 +800,34 @@ def cmd_update(root: Path, do_install: bool) -> int:
         print("  that release has neither FRBoard.exe nor a Dispatch_Board_*.zip.")
         return 1
 
+    # FRBoard.exe is preferred: it serves the board as well as bridging, so a
+    # release carrying it needs no separate web server. bridge.exe is the older
+    # split build, still accepted so this can update an install that predates
+    # the merge.
+    exe_name = next((n for n in ("FRBoard.exe", "bridge.exe") if n in assets), None)
+
     with tempfile.TemporaryDirectory() as tmp:
         tmpdir = Path(tmp)
 
+        # Everything is downloaded and checked before anything installed is
+        # touched, so a file that fails its checksum leaves the install as it was.
+        wanted = [n for n in (board, exe_name, "IRC_Scripts.zip", SETUP_EXE) if n and n in assets]
+        try:
+            sums = fetch_sums(assets, tmpdir)
+            got = {}
+            for name in wanted:
+                print(f"  downloading {name}")
+                got[name] = verified_download(name, assets, sums, tmpdir / name)
+        except ChecksumError as err:
+            print(f"  refusing to install: {err}")
+            return 1
+        except (urllib.error.URLError, OSError) as err:
+            print(f"  download failed: {err}")
+            return 1
+        print(f"  verified {len(got)} file(s) against {SUMS_NAME}")
+
         if board is not None:
-            print(f"  downloading {board}")
-            safe_extract(download(assets[board], tmpdir / board), tmpdir / "board")
+            safe_extract(got[board], tmpdir / "board")
 
             staged = tmpdir / "board"
             dist = staged / "dist"
@@ -727,16 +847,10 @@ def cmd_update(root: Path, do_install: bool) -> int:
         else:
             print("  board travels inside FRBoard.exe; no separate copy needed")
 
-        # FRBoard.exe is preferred: it serves the board as well as bridging, so
-        # a release carrying it needs no separate web server. bridge.exe is the
-        # older split build, still accepted so this can update an install that
-        # predates the merge.
-        exe_name = next((n for n in ("FRBoard.exe", "bridge.exe") if n in assets), None)
         exe_skipped = False
         if exe_name is not None:
             if stop_bridge():
-                download(assets[exe_name], tmpdir / exe_name)
-                shutil.copy2(tmpdir / exe_name, root / exe_name)
+                shutil.copy2(got[exe_name], root / exe_name)
                 print(f"  {exe_name} updated")
                 # Leave no doubt about which one to run.
                 stale = root / ("bridge.exe" if exe_name == "FRBoard.exe" else "FRBoard.exe")
@@ -747,11 +861,20 @@ def cmd_update(root: Path, do_install: bool) -> int:
                 print(f"  {exe_name} is still running and could not be replaced; skipped")
                 exe_skipped = True
 
-        if "IRC_Scripts.zip" in assets:
-            safe_extract(download(assets["IRC_Scripts.zip"], tmpdir / "irc.zip"), tmpdir / "irc")
+        if "IRC_Scripts.zip" in got:
+            safe_extract(got["IRC_Scripts.zip"], tmpdir / "irc")
             install_irc_scripts(tmpdir / "irc", do_install)
         else:
             print("  that release has no IRC_Scripts.zip; skipped the bridge scripts")
+
+        # The installer beside the app is what the board's update button runs,
+        # so it moves forward too.
+        if SETUP_EXE in got and root.is_dir():
+            try:
+                replace_setup(root, got[SETUP_EXE])
+                print(f"  {SETUP_EXE} updated")
+            except OSError as err:
+                print(f"  could not update {SETUP_EXE}: {err}")
 
     if exe_skipped:
         # The version stamp is what --check and the board compare against, so

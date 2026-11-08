@@ -85,6 +85,17 @@ foreach ($exe in @("FRBoard.exe", "FRBoard-Setup.exe")) {
     Copy-Item $src "$releaseDir\$exe"
 }
 
+# --- checksums ----------------------------------------------------------------
+# sha256sum's format, one "<hex>  <name>" line per file. The installer checks
+# every download against this and refuses a release without it. LF endings and
+# no BOM, so `sha256sum -c` reads it as well.
+$sumsFile = "$releaseDir\SHA256SUMS.txt"
+$sumLines = Get-ChildItem $releaseDir -File | Where-Object { $_.Name -ne 'SHA256SUMS.txt' } | Sort-Object Name | ForEach-Object {
+    "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(), $_.Name
+}
+[System.IO.File]::WriteAllText($sumsFile, (($sumLines -join "`n") + "`n"), (New-Object System.Text.UTF8Encoding $false))
+Write-Host "Wrote $sumsFile" -ForegroundColor Cyan
+
 Write-Host ""
 Write-Host "Release v$version ready in .\release\" -ForegroundColor Green
 Get-ChildItem $releaseDir | ForEach-Object {

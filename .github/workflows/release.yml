@@ -174,7 +174,10 @@ jobs:
 
           UPLOAD="$(gh api "repos/$GITHUB_REPOSITORY/releases/$REL_ID" --jq .upload_url | sed 's/{.*//')"
 
-          for f in release/*; do
+          # SHA256SUMS.txt goes up last. The board only offers an update once it
+          # is there, so a release still receiving its files is never offered.
+          test -f release/SHA256SUMS.txt || { echo "::error::release/SHA256SUMS.txt missing"; exit 1; }
+          for f in $(ls release/* | grep -v '/SHA256SUMS.txt$') release/SHA256SUMS.txt; do
             NAME="$(basename "$f")"
             # A re-run has to replace rather than collide.
             OLD="$(NAME="$NAME" gh api "repos/$GITHUB_REPOSITORY/releases/$REL_ID/assets" \

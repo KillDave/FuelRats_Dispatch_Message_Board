@@ -509,9 +509,10 @@ def _run_updater():
     """
     Hand the update to FRBoard-Setup.exe and get out of its way.
 
-    Answered before any work happens, because the work kills this process: the
-    installer stops FRBoard.exe so the file can be replaced, then starts it
-    again. Waiting for a result would mean waiting to be killed.
+    Answered as soon as the installer is started, because the work kills this
+    process: the installer stops FRBoard.exe so the file can be replaced, then
+    starts it again. Waiting for a result would mean waiting to be killed. The
+    only thing done first is fetching and verifying the installer itself.
 
     Only offered from the packaged build. From a source checkout there is no
     installer beside us and nothing sensible to replace -- `git pull` is the
@@ -522,6 +523,17 @@ def _run_updater():
         return 400, 'application/json', body
 
     setup = os.path.join(os.path.dirname(sys.executable), 'FRBoard-Setup.exe')
+
+    # Swap in the latest release's installer, checked against that release's
+    # SHA256SUMS.txt, before running it. The copy already installed may predate
+    # checksums; the fresh one verifies everything else it downloads.
+    try:
+        import installer
+        print(f"[Update] {installer.refresh_setup(installer.Path(os.path.dirname(sys.executable)))}")
+    except Exception as e:
+        print(f"[Update] refused: {e}")
+        return 502, 'application/json', json.dumps({'error': f'update not verified: {e}'}).encode()
+
     if not os.path.isfile(setup):
         body = json.dumps({
             'error': 'FRBoard-Setup.exe is not beside FRBoard.exe; reinstall to restore it',
@@ -650,7 +662,10 @@ async def handle_deepl_http(reader, writer):
             body += chunk
 
         if path.startswith('/update') and method == 'POST':
-            status, content_type, resp_body = _run_updater()
+            # Downloads and verifies the installer first, so off the event loop.
+            status, content_type, resp_body = await asyncio.get_event_loop().run_in_executor(
+                None, _run_updater
+            )
         elif path.startswith('/journal/commanders'):
             payload = json.dumps(_journal_commanders()).encode()
             status, content_type, resp_body = 200, 'application/json', payload
