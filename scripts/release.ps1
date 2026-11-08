@@ -89,10 +89,19 @@ foreach ($exe in @("FRBoard.exe", "FRBoard-Setup.exe")) {
 # sha256sum's format, one "<hex>  <name>" line per file. The installer checks
 # every download against this and refuses a release without it. LF endings and
 # no BOM, so `sha256sum -c` reads it as well.
+#
+# .NET's SHA256 rather than Get-FileHash: that cmdlet lives in a script module
+# which Windows PowerShell cannot load when started from PowerShell 7 -- as the
+# Actions runner does -- because it inherits PowerShell 7's module path.
 $sumsFile = "$releaseDir\SHA256SUMS.txt"
+$sha = [System.Security.Cryptography.SHA256]::Create()
 $sumLines = Get-ChildItem $releaseDir -File | Where-Object { $_.Name -ne 'SHA256SUMS.txt' } | Sort-Object Name | ForEach-Object {
-    "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(), $_.Name
+    $stream = [System.IO.File]::OpenRead($_.FullName)
+    try { $hex = -join ($sha.ComputeHash($stream) | ForEach-Object { $_.ToString('x2') }) }
+    finally { $stream.Dispose() }
+    "{0}  {1}" -f $hex, $_.Name
 }
+$sha.Dispose()
 [System.IO.File]::WriteAllText($sumsFile, (($sumLines -join "`n") + "`n"), (New-Object System.Text.UTF8Encoding $false))
 Write-Host "Wrote $sumsFile" -ForegroundColor Cyan
 
