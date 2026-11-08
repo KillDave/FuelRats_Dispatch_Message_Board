@@ -1,5 +1,6 @@
 import type { Injection } from '../components/DispatchBoard';
 import { parseNote } from '../components/CaseNotes';
+import { namePatternSource } from './nameMatch';
 
 /**
  * Matches "7min", "4 minutes O2", "19min o2", "5 minutes just about", and
@@ -83,7 +84,7 @@ export function parseDurationSeconds(text: string): number | null {
   return null;
 }
 
-const normalize = (s: string) => s.toLowerCase().replace(/[. _]+/g, '[. _]*');
+const normalize = namePatternSource;
 
 /**
  * The newest note (not a bot entry) that carries a parseable O2 estimate.

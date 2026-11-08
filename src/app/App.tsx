@@ -13,7 +13,7 @@ import { authService } from '@/app/services/authService';
 
 
 function handleOAuthCallback(): boolean {
-  if (window.location.pathname !== '/callback') return false;
+  if (window.location.pathname.replace(/\/$/, '') !== '/callback') return false;
   try {
     authService.handleCallback();
   } catch (e) {

@@ -92,10 +92,11 @@ export class IRCWebSocketService {
    */
   sendMessage(target: string, message: string): void {
     if (this.ws?.readyState === WebSocket.OPEN) {
+      // One IRC line per message; the bridge enforces the same.
       const payload = {
         type: 'message',
         target,
-        text: message
+        text: message.replace(/[\r\n]+/g, ' ')
       };
       this.ws.send(JSON.stringify(payload));
     } else {
@@ -113,7 +114,7 @@ export class IRCWebSocketService {
     if (this.ws?.readyState === WebSocket.OPEN) {
       const payload = {
         type: 'raw',
-        command
+        command: command.replace(/[\r\n]+/g, ' ')
       };
       this.ws.send(JSON.stringify(payload));
     }

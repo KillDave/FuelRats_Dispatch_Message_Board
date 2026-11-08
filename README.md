@@ -103,6 +103,13 @@ FRBoard.exe --unregister
 `Dispatch_Board_vX.Y.Z.zip` is still published for anyone who would rather serve
 `dist/` themselves — with the `.bat`, or any static web server. Note it contains
 only the board: pair it with `FRBoard.exe` if you want the IRC bridge as well.
+The bridge only answers pages served from `http://localhost:5173` or
+`http://127.0.0.1:5173`, so a board served from anywhere else needs its origin
+added to `bridge-config.json` beside `FRBoard.exe`:
+
+```json
+{ "allowed_origins": ["http://localhost:5173", "http://localhost:8000"] }
+```
 
 ### 3. Log in
 

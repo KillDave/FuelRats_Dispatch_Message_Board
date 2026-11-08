@@ -1,5 +1,6 @@
 import ReactDOM from "react-dom/client";
 import App from "./app/App";
+import { ErrorBoundary } from "./app/components/ErrorBoundary";
 import "./styles/index.css";
 //import "./styles/tailwind.css";
 
@@ -9,4 +10,8 @@ if (!root) {
   throw new Error("Root element not found");
 }
 
-ReactDOM.createRoot(root).render(<App />);
+ReactDOM.createRoot(root).render(
+  <ErrorBoundary>
+    <App />
+  </ErrorBoundary>
+);

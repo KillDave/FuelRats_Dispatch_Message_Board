@@ -1,5 +1,6 @@
 import type { Case } from '../components/DispatchBoard';
 import { TIMER_START_RE, TIMER_STOP_RE } from './codeRedTimerService';
+import { isMechaSqueak } from './nameMatch';
 
 /**
  * What a message in the rescue channel does to a case.
@@ -55,7 +56,7 @@ export function readRatMessage(c: Case, ctx: RatMessageContext): RatMessageEffec
   // Bot lines are skipped because MechaSqueak's announcements carry a system
   // distance -- "97.6 LY from Sol" -- which is not how far the rat still has
   // to fly.
-  const isBotNick = nick?.toLowerCase().includes('mechasqueak') ?? false;
+  const isBotNick = isMechaSqueak(nick);
   let scDistance = c.scDistance;
   if (!isBotNick && new RegExp(`#${caseNum}\\b`).test(text)) {
     const distMatch = text.match(/([\d]*\.?[\d]+)\s*(Mls|kls|ls|ly|au)\b/i);

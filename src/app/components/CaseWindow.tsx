@@ -358,7 +358,7 @@ export function CaseWindow({
       } else {
         const targetLang = toDeepLTargetLang(caseData.language);
         const translated = await translateText(messageInput, targetLang);
-        if (translated) finalMessage = translated;
+        if (translated) finalMessage = translated.replace(/^\/+/, '');
       }
     } else if (langblyEnabled && caseData.language && !caseData.language.toLowerCase().startsWith('en')) {
       if (isCommand) {
@@ -371,7 +371,7 @@ export function CaseWindow({
       } else {
         const targetLang = toLangblyTargetLang(caseData.language);
         const translated = await langblyTranslate(messageInput, targetLang);
-        if (translated) finalMessage = translated;
+        if (translated) finalMessage = translated.replace(/^\/+/, '');
       }
     }
 
@@ -545,11 +545,18 @@ export function CaseWindow({
     const ratCmdrNick = formatList(caseData.assignedRats.map((r) => `"${r}"`));
     const ratIrcNick = formatList(caseData.assignedRats.map(getRatIrcNick));
 
-    return template
-      .replace(/\{clientName\}/g, clientName)
-      .replace(/\{caseNumber\}/g, String(caseNumber))
-      .replace(/\{ratCmdrNick\}/g, ratCmdrNick)
-      .replace(/\{ratIrcNick\}/g, ratIrcNick);
+    // Names come from outside the board, so they are kept to plain text: one
+    // line, and never able to turn the message into a client command by
+    // landing at its start. A function replacement, so `$&` and friends in a
+    // name stay literal.
+    const plain = (s: string) => s.replace(/[\x00-\x1f]+/g, ' ').replace(/^[\s/]+/, '');
+    const filled = template
+      .replace(/\{clientName\}/g, () => plain(clientName))
+      .replace(/\{caseNumber\}/g, () => String(caseNumber))
+      .replace(/\{ratCmdrNick\}/g, () => plain(ratCmdrNick))
+      .replace(/\{ratIrcNick\}/g, () => plain(ratIrcNick));
+    // Only a template the dispatcher wrote with a leading / is a command.
+    return template.startsWith('/') ? filled : filled.replace(/^\/+/, '');
   };
 
   // Commands that support the -a (auto-translate) suffix
@@ -587,7 +594,7 @@ export function CaseWindow({
       } else {
         const targetLang = toDeepLTargetLang(caseData.language);
         const translated = await translateText(message, targetLang);
-        if (translated) finalMessage = translated;
+        if (translated) finalMessage = translated.replace(/^\/+/, '');
       }
     } else if (langblyEnabled && caseData.language && !caseData.language.toLowerCase().startsWith('en')) {
       if (isCommand) {
@@ -600,7 +607,7 @@ export function CaseWindow({
       } else {
         const targetLang = toLangblyTargetLang(caseData.language);
         const translated = await langblyTranslate(message, targetLang);
-        if (translated) finalMessage = translated;
+        if (translated) finalMessage = translated.replace(/^\/+/, '');
       }
     }
 

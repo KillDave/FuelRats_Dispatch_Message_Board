@@ -13,6 +13,7 @@ import { IRCConnectionPanel } from './IRCConnectionPanel';
 import { openEdsmPopout } from '../services/edsmPopout';
 import { findLatestGrabDuration, parseManualInput } from '../services/codeRedTimerService';
 import { readRatMessage } from '../services/ratMessageService';
+import { namePatternSource, isMechaSqueak } from '../services/nameMatch';
 import fuelRatsLogo from './image/TransparentBackgroundRatto.png';
 import disconnectIcon from './image/Disconnect_Icon.png';
 import { dispatchMessages, rescueMessages } from '../config/quickMessages';
@@ -1033,14 +1034,12 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
         const exactNickMatch = ircNickLower && (effectiveNickLower === ircNickLower || textLower.includes(ircNickLower));
 
         // Fallback: fuzzy match client name (handles spaces, underscores, periods)
-        const clientNameLower = c.clientName.toLowerCase();
-        const normalizedClientName = clientNameLower.replace(/[. _]+/g, '[. _]*');
-        const namePattern = new RegExp(normalizedClientName);
+        const namePattern = new RegExp(namePatternSource(c.clientName));
         const fuzzyMatch = namePattern.test(effectiveNickLower) || namePattern.test(textLower);
 
         // Check if the message sender is an assigned rat (e.g. "Dr Leo" → matches IRC nick "Dr_Leo")
         const matchedRatName = c.assignedRats.find((ratName) => {
-          const normalizedRat = ratName.toLowerCase().replace(/[. _]+/g, '[. _]*');
+          const normalizedRat = namePatternSource(ratName);
           return new RegExp(`^${normalizedRat}$`).test(effectiveNickLower) || new RegExp(normalizedRat).test(textLower);
         });
         const isAssignedRat = !!matchedRatName;
@@ -1078,8 +1077,7 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
           if (senderMatch) {
             const [, originalSender, translatedText] = senderMatch;
             // Find the most recent message from this sender (fuzzy match nick)
-            const normalizedSender = originalSender.toLowerCase().replace(/[. _]+/g, '[. _]*');
-            const senderPattern = new RegExp(`^${normalizedSender}$`, 'i');
+            const senderPattern = new RegExp(`^${namePatternSource(originalSender)}$`, 'i');
             const lastMsgIndex = [...c.messages].reverse().findIndex(
               (msg) => !msg.isSystem && senderPattern.test(msg.sender.toLowerCase())
             );
@@ -1127,7 +1125,7 @@ export function DispatchBoard({ onLogout }: { onLogout?: () => void }) {
         // PRIMARY: learn nick → CMDR from MechaSqueak's response to !gofr/!go
         // Response format (any language): ... "CMDR Name 1" "CMDR Name 2"
         // Zip quoted names from the response with nicks from the command by index
-        if (ircMsg.nick?.toLowerCase().includes('mechasqueak')) {
+        if (isMechaSqueak(ircMsg.nick)) {
           const lastCmd = lastRatCommandRef.current.get(c.id);
           if (lastCmd && Date.now() - lastCmd.time < 30000) {
             const quotedNames = [...displayText.matchAll(/"([^"]+)"/g)].map((m) => m[1]);

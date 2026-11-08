@@ -57,16 +57,23 @@ on *:SOCKREAD:ircbridge*: {
     ; which reads as "sending is broken" while working perfectly for everybody
     ; else.
     ;
-    ; CTCP (/me arrives as PRIVMSG with a chr(1) wrapper) and every other command
-    ; still go through as raw, since /msg would send those as literal text.
+    ; CTCP goes to the server with /raw, since /msg would send it as literal
+    ; text.
+    ;
+    ; A line starting with / is a client command the dispatcher typed into the
+    ; board (/tr, /describe, ...) and runs as one. Anything else is an IRC line
+    ; and goes to the server with /raw, never run as a client command.
     if ($gettok(%data, 1, 32) == PRIVMSG) {
       var %target = $gettok(%data, 2, 32)
       var %body = $mid($gettok(%data, 3-, 32), 2)
-      if ($left(%body, 1) == $chr(1)) { %data }
+      if ($left(%body, 1) == $chr(1)) { raw %data }
       else { msg %target %body }
     }
-    else {
+    elseif ($left(%data, 1) == /) {
       %data
+    }
+    else {
+      raw %data
     }
   }
 }
@@ -202,8 +209,10 @@ alias bridge.start {
   ; any number of times. Only the listener is closed; bridges already accepted
   ; are named ircbridgeNNNN and keep their connections.
   sockclose ircbridge
-  socklisten ircbridge 12346
-  echo -a *** TCP server listening on port 12346
+  ; Loopback only: the bridge runs on this machine and nothing else should
+  ; be able to reach this socket.
+  socklisten -d 127.0.0.1 ircbridge 12346
+  echo -a *** TCP server listening on 127.0.0.1:12346
 }
 
 alias bridge.stop {

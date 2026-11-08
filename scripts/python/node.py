@@ -4,9 +4,11 @@ import json
 import sys
 import os
 import logging
+import re
 import subprocess
 import urllib.request
 import urllib.error
+import urllib.parse
 import webbrowser
 from datetime import datetime, timezone
 import traceback
@@ -39,13 +41,56 @@ _cfg       = load_config()
 WS_PORT    = int(_cfg.get('ws_port',    8080))
 PROXY_PORT = int(_cfg.get('proxy_port', 8081))
 
+# The pages allowed to use the bridge and the proxy: the board as FRBoard.exe
+# and `npm run dev` serve it. Anyone serving dist/ from somewhere else adds
+# that origin to "allowed_origins" in bridge-config.json.
+ALLOWED_ORIGINS = set(_cfg.get('allowed_origins') or [
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+])
+
+# Upper bounds on what one proxy request may send. Translation text, a Spansh
+# form and the update trigger are all far below these.
+MAX_HEADER_BYTES = 64 * 1024
+MAX_BODY_BYTES   = 2 * 1024 * 1024
+
+
+def _origin_allowed(origin):
+    """No Origin at all is a local tool such as curl; a browser always sends one."""
+    return origin is None or origin in ALLOWED_ORIGINS
+
+
+def _host_allowed(host, port):
+    """Only loopback names, so the proxy answers to nothing but this machine."""
+    return host in (f'localhost:{port}', f'127.0.0.1:{port}', f'[::1]:{port}')
+
+
+class _SameHostRedirects(urllib.request.HTTPRedirectHandler):
+    """Follow a redirect only to the same https host the request was for."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        old = urllib.parse.urlsplit(req.full_url)
+        new = urllib.parse.urlsplit(urllib.parse.urljoin(req.full_url, newurl))
+        if new.scheme != 'https' or new.hostname != old.hostname:
+            raise urllib.error.HTTPError(req.full_url, 502, 'redirect refused', headers, fp)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+_opener = urllib.request.build_opener(_SameHostRedirects)
+
+
+def _open(req, timeout=60):
+    return _opener.open(req, timeout=timeout)
+
 # ── DeepL proxy (runs on same port as WebSocket via process_request) ──────────
 
 def _deepl_forward(path, headers, body):
     if path.startswith('/deepl-proxy-pro/'):
         target = 'https://api.deepl.com' + path[len('/deepl-proxy-pro'):]
-    else:
+    elif path.startswith('/deepl-proxy/'):
         target = 'https://api-free.deepl.com' + path[len('/deepl-proxy'):]
+    else:
+        return 404, 'text/plain', b'Not found'
 
     if body:
         try:
@@ -65,7 +110,7 @@ def _deepl_forward(path, headers, body):
     )
 
     try:
-        with urllib.request.urlopen(req) as resp:
+        with _open(req) as resp:
             data = resp.read()
             try:
                 result = json.loads(data).get('translations', [{}])[0].get('text', '')
@@ -104,7 +149,7 @@ def _langbly_forward(path, headers, body, method='POST'):
     )
 
     try:
-        with urllib.request.urlopen(req) as resp:
+        with _open(req) as resp:
             data = resp.read()
             try:
                 result = json.loads(data).get('data', {}).get('translations', [{}])[0].get('translatedText', '')
@@ -145,7 +190,7 @@ def _spansh_forward(path, headers, body, method='POST'):
     )
 
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with _open(req, timeout=30) as resp:
             data = resp.read()
             try:
                 parsed = json.loads(data)
@@ -353,11 +398,37 @@ def _journal_commanders(max_files=60):
         return {'error': str(e)}
 
 
-CORS = (
-    'Access-Control-Allow-Origin: *\r\n'
-    'Access-Control-Allow-Headers: Authorization, Content-Type\r\n'
-    'Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n'
-)
+def _cors(origin):
+    """CORS headers naming the requesting origin, which is already allowed."""
+    if origin is None:
+        return ''
+    return (
+        f'Access-Control-Allow-Origin: {origin}\r\n'
+        'Vary: Origin\r\n'
+        'Access-Control-Allow-Headers: Authorization, Content-Type\r\n'
+        'Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n'
+    )
+
+
+async def _read_head(reader):
+    """Read up to the end of the headers, or None if they run past the limit."""
+    data = b''
+    while b'\r\n\r\n' not in data:
+        if len(data) > MAX_HEADER_BYTES:
+            return None
+        chunk = await reader.read(4096)
+        if not chunk:
+            return None
+        data += chunk
+    return data
+
+
+def _plain(writer, status, text):
+    body = text.encode()
+    writer.write(
+        f'HTTP/1.1 {status}\r\nContent-Type: text/plain\r\n'
+        f'Content-Length: {len(body)}\r\nConnection: close\r\n\r\n'.encode() + body
+    )
 
 # ── The board itself ─────────────────────────────────────────────────────────
 #
@@ -420,8 +491,12 @@ def _board_file(path):
     if clean in ('', '/'):
         clean = '/index.html'
 
+    real_root = os.path.realpath(root)
     candidate = os.path.realpath(os.path.join(root, clean.lstrip('/').replace('/', os.sep)))
-    if not candidate.startswith(os.path.realpath(root)):
+    try:
+        if os.path.commonpath([candidate, real_root]) != real_root:
+            return None
+    except ValueError:   # a different drive entirely
         return None
     if os.path.isfile(candidate):
         return candidate
@@ -477,12 +552,9 @@ def _run_updater():
 async def handle_board_http(reader, writer):
     """Static file server for the board. Loopback only, GET and HEAD only."""
     try:
-        data = b''
-        while b'\r\n\r\n' not in data:
-            chunk = await reader.read(4096)
-            if not chunk:
-                return
-            data += chunk
+        data = await _read_head(reader)
+        if data is None:
+            return
 
         request_line = data[:data.index(b'\r\n')].decode('utf-8', errors='replace')
         parts = request_line.split(' ')
@@ -532,12 +604,11 @@ async def handle_board_http(reader, writer):
 
 async def handle_deepl_http(reader, writer):
     try:
-        data = b''
-        while b'\r\n\r\n' not in data:
-            chunk = await reader.read(4096)
-            if not chunk:
-                return
-            data += chunk
+        data = await _read_head(reader)
+        if data is None:
+            _plain(writer, '431 Request Header Fields Too Large', 'Headers too large')
+            await writer.drain()
+            return
 
         header_end = data.index(b'\r\n\r\n')
         header_text = data[:header_end].decode('utf-8', errors='replace')
@@ -551,12 +622,26 @@ async def handle_deepl_http(reader, writer):
                 k, _, v = line.partition(':')
                 headers[k.strip().lower()] = v.strip()
 
+        origin = headers.get('origin')
+        if not _host_allowed(headers.get('host'), PROXY_PORT) or not _origin_allowed(origin):
+            _plain(writer, '403 Forbidden', 'Forbidden')
+            await writer.drain()
+            return
+        cors = _cors(origin)
+
         if method == 'OPTIONS':
-            writer.write(f'HTTP/1.1 204 No Content\r\n{CORS}Content-Length: 0\r\n\r\n'.encode())
+            writer.write(f'HTTP/1.1 204 No Content\r\n{cors}Content-Length: 0\r\n\r\n'.encode())
             await writer.drain()
             return
 
-        content_length = int(headers.get('content-length', 0))
+        try:
+            content_length = int(headers.get('content-length', 0))
+        except ValueError:
+            content_length = -1
+        if content_length < 0 or content_length > MAX_BODY_BYTES:
+            _plain(writer, '413 Payload Too Large', 'Body too large')
+            await writer.drain()
+            return
         body = body_so_far
         while len(body) < content_length:
             chunk = await reader.read(content_length - len(body))
@@ -590,7 +675,7 @@ async def handle_deepl_http(reader, writer):
             f'HTTP/1.1 {status} OK\r\n'
             f'Content-Type: {content_type}\r\n'
             f'Content-Length: {len(resp_body)}\r\n'
-            f'{CORS}\r\n'
+            f'{cors}\r\n'
         ).encode() + resp_body
         writer.write(response)
         await writer.drain()
@@ -675,6 +760,26 @@ elif arg == "--unregister":
 
 connected_clients = set()
 
+# One IRC line per message. CR, LF and NUL end or corrupt a line, and \x01
+# is CTCP framing, which the board never needs in a plain message (its /me goes
+# out as /describe).
+_LINE_BREAKS = re.compile(r'[\r\n]+')
+_UNSAFE_CHARS = re.compile(r'[\x00\x01]')
+# A channel or nick: no whitespace, no control characters, no commas.
+_VALID_TARGET = re.compile(r'^[^\s,\x00-\x1f]{1,64}$')
+
+
+def _clean_text(text):
+    return _UNSAFE_CHARS.sub('', _LINE_BREAKS.sub(' ', str(text)))
+
+
+def _clean_command(command):
+    """A raw command must be a single line; anything else is refused whole."""
+    command = str(command)
+    if _LINE_BREAKS.search(command) or _UNSAFE_CHARS.search(command):
+        return None
+    return command
+
 async def handle_client(websocket):
     connected_clients.add(websocket)
     client_addr = websocket.remote_address if hasattr(websocket, 'remote_address') else 'unknown'
@@ -732,14 +837,20 @@ async def handle_client(websocket):
                     try:
                         data = json.loads(message)
                         if data.get("type") == "message":
-                            target = data.get("target", "#fuelrats")
-                            text = data.get("text", "")
+                            target = str(data.get("target", "#fuelrats"))
+                            text = _clean_text(data.get("text", ""))
+                            if not _VALID_TARGET.match(target):
+                                print(f"WARN Refused message to an invalid target: {target!r}")
+                                continue
                             irc_command = f"PRIVMSG {target} :{text}\r\n"
                             writer.write(irc_command.encode())
                             await writer.drain()
                             print(f"-> IRC: {irc_command.strip()}")
                         elif data.get("type") == "raw":
-                            command = data.get("command", "")
+                            command = _clean_command(data.get("command", ""))
+                            if command is None:
+                                print("WARN Refused a raw command spanning more than one line")
+                                continue
                             writer.write(f"{command}\r\n".encode())
                             await writer.drain()
                             print(f"-> IRC RAW: {command}")
@@ -889,6 +1000,8 @@ async def main():
             WS_PORT,
             ping_interval=20,
             ping_timeout=10,
+            # Only the board's own pages may connect.
+            origins=sorted(ALLOWED_ORIGINS),
         ):
             print(f"OK WebSocket bridge listening on port {WS_PORT}")
             print("Waiting for dispatch board connection...")

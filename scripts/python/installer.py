@@ -148,6 +148,12 @@ def create_shortcut(link: Path, target: Path, args: str = "", desc: str = "") ->
     installed on the machine it is run from.
     """
     link.parent.mkdir(parents=True, exist_ok=True)
+
+    def q(value) -> str:
+        # Inside a PowerShell single-quoted string the only special character
+        # is the quote itself, written twice to stand for one.
+        return str(value).replace("'", "''")
+
     ps = (
         "$s = (New-Object -ComObject WScript.Shell).CreateShortcut('{link}');"
         "$s.TargetPath = '{target}';"
@@ -155,7 +161,7 @@ def create_shortcut(link: Path, target: Path, args: str = "", desc: str = "") ->
         "$s.WorkingDirectory = '{wd}';"
         "$s.Description = '{desc}';"
         "$s.Save()"
-    ).format(link=link, target=target, args=args, wd=target.parent, desc=desc)
+    ).format(link=q(link), target=q(target), args=q(args), wd=q(target.parent), desc=q(desc))
     try:
         done = subprocess.run(
             ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
@@ -270,7 +276,7 @@ def safe_extract(archive: Path, into: Path) -> None:
             if not name or name.endswith("/"):
                 continue
             target = (root / name).resolve()
-            if not str(target).startswith(str(root)):
+            if not target.is_relative_to(root):
                 raise ValueError(f"archive entry escapes the target folder: {info.filename}")
             target.parent.mkdir(parents=True, exist_ok=True)
             with z.open(info) as src, target.open("wb") as dst:
@@ -559,6 +565,15 @@ def finish_install(root: Path, version: str, desktop: bool) -> None:
         print("  could not add the Add/Remove Programs entry")
 
 
+def installed_items(root: Path) -> list[Path]:
+    """The files and folders an install or update writes into `root`."""
+    names = [BOARD_EXE, SETUP_EXE, "bridge.exe", STAMP, "dist", "installer.py"]
+    items = [root / n for n in names]
+    items += list(root.glob("*.bat"))
+    items += list(root.glob("*.exe.superseded"))
+    return [p for p in items if p.exists() or p.is_symlink()]
+
+
 def cmd_uninstall(interactive_mode: bool = False) -> int:
     """Remove the app, its shortcuts and its registration."""
     root = existing_install()
@@ -586,14 +601,19 @@ def cmd_uninstall(interactive_mode: bool = False) -> int:
     unregister_uninstall()
     print("  registry entry removed")
 
-    # Everything except this executable, which Windows holds open for as long
-    # as it is running.
+    # Only what this installer puts there. The folder is wherever the install
+    # was pointed, which need not be one the app owns outright, so anything
+    # else in it is left alone. This executable is skipped too: Windows holds
+    # it open for as long as it is running.
     running = Path(sys.executable).resolve() if getattr(sys, "frozen", False) else None
-    for item in sorted(root.rglob("*"), key=lambda p: len(p.parts), reverse=True):
+    for item in installed_items(root):
         if running is not None and item.resolve() == running:
             continue
         try:
-            item.unlink() if item.is_file() else item.rmdir()
+            if item.is_dir() and not item.is_symlink():
+                shutil.rmtree(item)
+            else:
+                item.unlink()
         except OSError:
             pass
 
@@ -608,8 +628,12 @@ def cmd_uninstall(interactive_mode: bool = False) -> int:
         #
         # Keeping it is useful anyway: reinstalling or updating later needs no
         # fresh download.
-        print(f"  files removed; {SETUP_EXE} kept for reinstalling later")
-        print(f"  delete {root} yourself if you want it gone entirely")
+        left = [p for p in root.iterdir() if running is None or p.resolve() != running]
+        if left:
+            print(f"  app files removed; other files in {root} were left alone")
+        else:
+            print(f"  files removed; {SETUP_EXE} kept for reinstalling later")
+            print(f"  delete {root} yourself if you want it gone entirely")
 
     print("\n  The AdiIRC and HexChat scripts were left in place -- they are")
     print("  config for your IRC client, not part of this app.")
@@ -708,6 +732,7 @@ def cmd_update(root: Path, do_install: bool) -> int:
         # older split build, still accepted so this can update an install that
         # predates the merge.
         exe_name = next((n for n in ("FRBoard.exe", "bridge.exe") if n in assets), None)
+        exe_skipped = False
         if exe_name is not None:
             if stop_bridge():
                 download(assets[exe_name], tmpdir / exe_name)
@@ -720,12 +745,19 @@ def cmd_update(root: Path, do_install: bool) -> int:
                     print(f"  renamed the superseded {stale.name} out of the way")
             else:
                 print(f"  {exe_name} is still running and could not be replaced; skipped")
+                exe_skipped = True
 
         if "IRC_Scripts.zip" in assets:
             safe_extract(download(assets["IRC_Scripts.zip"], tmpdir / "irc.zip"), tmpdir / "irc")
             install_irc_scripts(tmpdir / "irc", do_install)
         else:
             print("  that release has no IRC_Scripts.zip; skipped the bridge scripts")
+
+    if exe_skipped:
+        # The version stamp is what --check and the board compare against, so
+        # it only moves once the executable has actually been replaced.
+        print(f"  not marked as {tag}: close {exe_name} and run the update again")
+        return 1
 
     (root / STAMP).write_text(tag, encoding="utf-8")
 
