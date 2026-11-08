@@ -1,5 +1,11 @@
 ## Changelog
 
+### v2.0.13
+- Releases now include `SHA256SUMS.txt`. The installer and the board's update button check every download against it and refuse anything that does not match, before anything installed is changed
+- The installer kept beside the app is now updated along with it
+- The update badge only appears once a release's files have all been published
+- The AdiIRC script reopens its listener by itself after an update, so no restart or `/bridge.start` is needed
+
 ### v2.0.12
 - Security fixes across the IRC bridge, the AdiIRC script, the board and the installer. Updating is strongly recommended
 - The updated AdiIRC script is placed by the installer; say yes when AdiIRC asks to reload it
