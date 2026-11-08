@@ -36,6 +36,11 @@ on *:SOCKLISTEN:ircbridge: {
   echo -s *** FuelRats IRC Bridge: Python bridge connected (%sock)
   ; Send our nick to the bridge so the dispatch board knows who we are
   sockwrite -n %sock IDENTIFY $me
+
+  ; Reloading this script does not reopen the listener, so one opened by an
+  ; older copy keeps that copy's settings. Reopen it once with the current
+  ; ones. Only the listener is restarted; this connection is kept.
+  if (%ircbridge.listener != 2) { .timerircbridge.rebind 1 1 bridge.start }
 }
 
 on *:SOCKREAD:ircbridge*: {
@@ -212,6 +217,8 @@ alias bridge.start {
   ; Loopback only: the bridge runs on this machine and nothing else should
   ; be able to reach this socket.
   socklisten -d 127.0.0.1 ircbridge 12346
+  ; Bump when the listener's settings change, so running clients reopen it.
+  set %ircbridge.listener 2
   echo -a *** TCP server listening on 127.0.0.1:12346
 }
 
